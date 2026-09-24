@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Verdict = Literal["pass", "fail", "review"]
+RuleAction = Literal["block", "redact", "review"]
+RecommendedAction = Literal["block", "redact", "review", "allow"]
 
 
 @dataclass(frozen=True)
@@ -14,10 +16,11 @@ class RuleResult:
     probability: float
     confidence: float
     verdict: Verdict
+    action: RuleAction = "block"
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RuleResult":
-        return cls(rule=d["rule"], type=d["type"], answer=d["answer"], probability=float(d["probability"]), confidence=float(d["confidence"]), verdict=d["verdict"])
+        return cls(rule=d["rule"], type=d["type"], answer=d["answer"], probability=float(d["probability"]), confidence=float(d["confidence"]), verdict=d["verdict"], action=d.get("action", "block"))
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class Evaluation:
     aggregate_score: float
     confidence: float
     latency_ms: int
+    recommended_action: RecommendedAction
     results: list[RuleResult] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -46,6 +50,7 @@ class Evaluation:
             aggregate_score=float(d["aggregate_score"]),
             confidence=float(d["confidence"]),
             latency_ms=int(d["latency_ms"]),
+            recommended_action=d.get("recommended_action", "block" if d["verdict"] == "fail" else "review" if d["verdict"] == "review" else "allow"),
             results=[RuleResult.from_dict(r) for r in d.get("results", [])],
             raw=d,
         )

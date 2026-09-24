@@ -80,6 +80,7 @@ def _annotate(value: Any, evaluation: Evaluation) -> Any:
         "verdict": evaluation.verdict,
         "aggregate_score": evaluation.aggregate_score,
         "confidence": evaluation.confidence,
+        "recommended_action": evaluation.recommended_action,
         "failed_rules": evaluation.failed_rules,
         "review_rules": evaluation.review_rules,
     }
@@ -102,14 +103,18 @@ def overwing_guard(
     on_review: Action = "annotate",
     replacement: str | Callable[[Evaluation], str] = DEFAULT_REPLACEMENT,
     metadata: dict[str, Any] | None = None,
+    context: dict[str, Any] | Callable[[], dict[str, Any]] | None = None,
     on_verdict: Callable[[Evaluation, str], None] | None = None,
     fail_open: bool = False,
+    honor_actions: bool = True,
 ) -> RunnableLambda:
     """A runnable that scores whatever flows through it (string, AIMessage, or list) and acts on the verdict.
 
     - fail    -> `on_fail`: "raise" (default) raises OverwingGuardrailError; "replace" swaps the text; "annotate" passes it through with the verdict on `response_metadata["overwing"]`.
     - review  -> `on_review`: "annotate" (default) | "raise" | "replace".
     - pass    -> passed through, annotated when the value is a message.
+    With `honor_actions` (default) a fail whose recommended_action is "redact" is replaced rather than raised.
+    `context` carries facts the rules may reference (recipient, channel, ownership).
     """
     ow = client or Overwing()
 
@@ -118,7 +123,8 @@ def overwing_guard(
         if not text:
             return value
         try:
-            evaluation = ow.evaluate(text, rule_set=rule_set, metadata={**(metadata or {}), "phase": "output", "source": "langchain"})
+            ctx = context() if callable(context) else context
+            evaluation = ow.evaluate(text, rule_set=rule_set, metadata={**(metadata or {}), "phase": "output", "source": "langchain"}, context=ctx)
         except OverwingError:
             if fail_open:
                 return value
@@ -126,6 +132,8 @@ def overwing_guard(
         if on_verdict:
             on_verdict(evaluation, "output")
         action = _decide(evaluation, on_fail, on_review)
+        if honor_actions and evaluation.verdict == "fail" and evaluation.recommended_action == "redact" and action == "raise":
+            action = "replace"
         if action == "raise":
             raise OverwingGuardrailError(evaluation, "output")
         if action == "replace":

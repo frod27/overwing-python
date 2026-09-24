@@ -74,3 +74,15 @@ def test_callback_checks_input_when_enabled(scripted):
     quiet = OverwingCallbackHandler(client=Overwing("k", transport=scripted([(200, fake_evaluation("fail"), None)]).transport()), on_fail="log")
     quiet.on_llm_end(LLMResult(generations=[[ChatGeneration(message=AIMessage(content="x"))]]), run_id=uuid4())
     assert quiet.verdicts[0][1].verdict == "fail"
+
+
+def test_guard_honors_redact_and_forwards_context(scripted):
+    s = scripted([(200, fake_evaluation("fail", recommended="redact"), None)])
+    guard = overwing_guard(client=Overwing("k", transport=s.transport()), context={"recipient": "customer"})
+    out = guard.invoke(AIMessage(content="call me at 555-0142"))
+    assert out.content == "I can't share that response."
+    assert out.response_metadata["overwing"]["recommended_action"] == "redact"
+    assert s.body()["context"] == {"recipient": "customer"}
+    strict = overwing_guard(client=Overwing("k", transport=scripted([(200, fake_evaluation("fail", recommended="redact"), None)]).transport()), honor_actions=False)
+    with pytest.raises(OverwingGuardrailError):
+        strict.invoke("call me")

@@ -80,8 +80,17 @@ from overwing import Overwing, AsyncOverwing
 ow = Overwing()   # or Overwing(api_key="ow_live_...")
 
 e = ow.evaluate("Reach me at dana@example.com to sort out the refund.")
-e.verdict            # "fail"
-e.failed_rules       # ["pii_detected"]
+e.verdict              # "fail"
+e.recommended_action   # "redact": remove the contact details, the message itself is fine
+e.failed_rules         # ["pii_detected"]
+
+# Give the rules context and use the context-aware prebuilt set
+ok = ow.evaluate(
+    "Reach me at dana@example.com to sort out the refund.",
+    rule_set="outbound-message",
+    context={"recipient": "one known customer", "channel": "email", "owns_contact_info": True},
+)
+ok.verdict             # "pass": the details are the sender's own, deliberately shared
 e.results[1]         # RuleResult(rule="pii_detected", answer=True, confidence=0.98, verdict="fail", ...)
 
 batch = ow.evaluate_batch([{"id": "a", "input": "..."}, {"id": "b", "input": "..."}])

@@ -5,16 +5,17 @@ import httpx
 import pytest
 
 
-def fake_evaluation(verdict: str, eid: str = "eval_0000000000000001") -> dict[str, Any]:
+def fake_evaluation(verdict: str, eid: str = "eval_0000000000000001", recommended: str | None = None) -> dict[str, Any]:
     return {
         "id": eid,
         "verdict": verdict,
+        "recommended_action": recommended or ("block" if verdict == "fail" else "review" if verdict == "review" else "allow"),
         "aggregate_score": 1.0 if verdict == "pass" else 0.5,
         "confidence": 0.9,
         "latency_ms": 42,
         "results": [
-            {"rule": "toxicity", "type": "choice", "answer": "toxic" if verdict == "fail" else "safe", "probability": 0.9, "confidence": 0.9, "verdict": "fail" if verdict == "fail" else "pass"},
-            {"rule": "pii_detected", "type": "noul", "answer": False, "probability": 0.9, "confidence": 0.6 if verdict == "review" else 0.9, "verdict": "review" if verdict == "review" else "pass"},
+            {"rule": "toxicity", "type": "choice", "answer": "toxic" if verdict == "fail" else "safe", "probability": 0.9, "confidence": 0.9, "verdict": "fail" if verdict == "fail" else "pass", "action": "block"},
+            {"rule": "pii_detected", "type": "noul", "answer": False, "probability": 0.9, "confidence": 0.6 if verdict == "review" else 0.9, "verdict": "review" if verdict == "review" else "pass", "action": "redact"},
         ],
     }
 

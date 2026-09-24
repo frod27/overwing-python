@@ -10,7 +10,7 @@ from ._errors import OverwingError
 from ._types import BatchResult, Evaluation
 
 DEFAULT_BASE_URL = "https://overwing.ai"
-_USER_AGENT = "overwing-python/0.1.0"
+_USER_AGENT = "overwing-python/0.2.0"
 
 
 def _resolve(api_key: str | None, base_url: str | None) -> tuple[str, str]:
@@ -35,6 +35,11 @@ def _retryable(res: httpx.Response) -> bool:
         return ra is None or float(ra) <= 5
     return res.status_code >= 500
 
+
+
+def _compact(body: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys whose value is None so optional fields are omitted from the request."""
+    return {k: v for k, v in body.items() if v is not None}
 
 class _Base:
     def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2) -> None:
@@ -89,13 +94,13 @@ class Overwing(_Base):
                 raise _error_from(res)
             return res.json() if res.content else None
 
-    def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        """Score one text. Raises OverwingError on any non-2xx."""
-        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json={"input": text, "rule_set": rule_set, "metadata": metadata}, idempotency_key=idempotency_key))
+    def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
+        """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). Raises OverwingError on any non-2xx."""
+        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": metadata, "context": context}), idempotency_key=idempotency_key))
 
-    def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", idempotency_key: str | None = None) -> BatchResult:
-        """Score up to 50 texts. Each item: {"input": str, "id"?: str, "metadata"?: dict}."""
-        return BatchResult.from_dict(self._request("POST", "/api/v1/evaluate/batch", json={"rule_set": rule_set, "items": items}, idempotency_key=idempotency_key, accept=(502,)))
+    def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
+        """Score up to 50 texts. Each item: {"input": str, "id"?: str, "metadata"?: dict, "context"?: dict}."""
+        return BatchResult.from_dict(self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context}), idempotency_key=idempotency_key, accept=(502,)))
 
     def get_evaluation(self, evaluation_id: str) -> dict[str, Any]:
         return self._request("GET", f"/api/v1/evaluations/{evaluation_id}")
@@ -156,11 +161,11 @@ class AsyncOverwing(_Base):
                 raise _error_from(res)
             return res.json() if res.content else None
 
-    async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json={"input": text, "rule_set": rule_set, "metadata": metadata}, idempotency_key=idempotency_key))
+    async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
+        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": metadata, "context": context}), idempotency_key=idempotency_key))
 
-    async def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", idempotency_key: str | None = None) -> BatchResult:
-        return BatchResult.from_dict(await self._request("POST", "/api/v1/evaluate/batch", json={"rule_set": rule_set, "items": items}, idempotency_key=idempotency_key, accept=(502,)))
+    async def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
+        return BatchResult.from_dict(await self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context}), idempotency_key=idempotency_key, accept=(502,)))
 
     async def get_evaluation(self, evaluation_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/v1/evaluations/{evaluation_id}")

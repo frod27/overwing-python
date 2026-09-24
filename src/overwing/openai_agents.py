@@ -73,11 +73,12 @@ def text_from_output(value: Any) -> str:
 
 
 class _Runner:
-    def __init__(self, *, client: AsyncOverwing | None, rule_set: str, trip_on: TripOn, metadata: dict[str, Any] | Callable[[], dict[str, Any]] | None, on_verdict: Callable[[Evaluation, str], None] | None, fail_open: bool) -> None:
+    def __init__(self, *, client: AsyncOverwing | None, rule_set: str, trip_on: TripOn, metadata: dict[str, Any] | Callable[[], dict[str, Any]] | None, on_verdict: Callable[[Evaluation, str], None] | None, fail_open: bool, context: dict[str, Any] | Callable[[], dict[str, Any]] | None = None) -> None:
         self.client = client or AsyncOverwing()
         self.rule_set = rule_set
         self.trip_on = trip_on
         self.metadata = metadata
+        self.context = context
         self.on_verdict = on_verdict
         self.fail_open = fail_open
 
@@ -87,7 +88,8 @@ class _Runner:
         meta = self.metadata() if callable(self.metadata) else dict(self.metadata or {})
         meta.update({"phase": phase, "source": "openai-agents"})
         try:
-            evaluation = await self.client.evaluate(text, rule_set=self.rule_set, metadata=meta)
+            ctx = self.context() if callable(self.context) else self.context
+            evaluation = await self.client.evaluate(text, rule_set=self.rule_set, metadata=meta, context=ctx)
         except OverwingError:
             if self.fail_open:
                 return GuardrailFunctionOutput(output_info={"evaluation": None, "skipped": "unreachable"}, tripwire_triggered=False)
@@ -108,9 +110,10 @@ def overwing_input_guardrail(
     on_verdict: Callable[[Evaluation, str], None] | None = None,
     fail_open: bool = False,
     run_in_parallel: bool = True,
+    context: dict[str, Any] | Callable[[], dict[str, Any]] | None = None,
 ) -> InputGuardrail[Any]:
-    """Scores the user's input before (or alongside) the agent run."""
-    runner = _Runner(client=client, rule_set=rule_set, trip_on=trip_on, metadata=metadata, on_verdict=on_verdict, fail_open=fail_open)
+    """Scores the user's input before (or alongside) the agent run. `context` carries facts the rules may reference."""
+    runner = _Runner(client=client, rule_set=rule_set, trip_on=trip_on, metadata=metadata, on_verdict=on_verdict, fail_open=fail_open, context=context)
 
     async def guardrail(ctx: RunContextWrapper[Any], agent: Agent[Any], input: Any) -> GuardrailFunctionOutput:  # noqa: A002
         return await runner.run(text_from_input(input), "input")
@@ -127,9 +130,10 @@ def overwing_output_guardrail(
     metadata: dict[str, Any] | Callable[[], dict[str, Any]] | None = None,
     on_verdict: Callable[[Evaluation, str], None] | None = None,
     fail_open: bool = False,
+    context: dict[str, Any] | Callable[[], dict[str, Any]] | None = None,
 ) -> OutputGuardrail[Any]:
-    """Scores the agent's final output before it is returned."""
-    runner = _Runner(client=client, rule_set=rule_set, trip_on=trip_on, metadata=metadata, on_verdict=on_verdict, fail_open=fail_open)
+    """Scores the agent's final output before it is returned. `context` carries facts the rules may reference."""
+    runner = _Runner(client=client, rule_set=rule_set, trip_on=trip_on, metadata=metadata, on_verdict=on_verdict, fail_open=fail_open, context=context)
 
     async def guardrail(ctx: RunContextWrapper[Any], agent: Agent[Any], output: Any) -> GuardrailFunctionOutput:
         return await runner.run(text_from_output(output), "output")
