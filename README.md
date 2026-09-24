@@ -8,7 +8,7 @@
 </p>
 
 <p align="center"><strong>Guardrails for LLM output, in one line.</strong><br>
-OpenAI Agents SDK guardrails and a typed client. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
+OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed client. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
 
 <p align="center">
   <a href="https://pypi.org/project/overwing/"><img alt="PyPI" src="https://img.shields.io/pypi/v/overwing?color=0B1220&label=overwing"></a>
@@ -20,7 +20,8 @@ OpenAI Agents SDK guardrails and a typed client. Every message gets a <code>pass
 ---
 
 ```bash
-pip install "overwing[agents]"     # or: uv add "overwing[agents]"
+pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
+pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
 
 Get a free API key at [overwing.ai](https://overwing.ai/login) (250 evaluations a day), or let your agent sign itself up with one `POST` to `/api/v1/signup`. Try it first with no key: paste anything into the console at [overwing.ai](https://overwing.ai).
@@ -46,6 +47,30 @@ except (InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered) as ex
 ```
 
 Both accept `rule_set`, `trip_on="fail" | "fail-or-review"`, `metadata`, `on_verdict`, and `fail_open`. Input guardrails run in parallel with the agent by default; pass `run_in_parallel=False` to block before the model is called. Reads `OVERWING_API_KEY` from the environment, or pass `client=AsyncOverwing(api_key=...)`.
+
+## LangChain
+
+Pipe a guard after your model. It scores the answer and acts on the verdict before anything downstream sees it.
+
+```python
+from overwing.langchain import overwing_guard, OverwingGuardrailError
+
+chain = prompt | llm | overwing_guard(on_fail="replace")   # or on_fail="raise" (default) / "annotate"
+msg = chain.invoke({"question": "..."})
+msg.response_metadata["overwing"]   # {"verdict": "pass", "confidence": 0.97, "failed_rules": [], ...}
+```
+
+Or observe every LLM call with a callback handler, which aborts the run on `fail`:
+
+```python
+from overwing.langchain import OverwingCallbackHandler
+
+handler = OverwingCallbackHandler(check_input=True)   # also scores the user's prompt
+llm.invoke("...", config={"callbacks": [handler]})
+handler.verdicts   # [("input", Evaluation), ("output", Evaluation), ...]
+```
+
+Both accept `rule_set`, `metadata`, `on_verdict`, and `fail_open`. There is an `AsyncOverwingCallbackHandler` too.
 
 ## Client
 

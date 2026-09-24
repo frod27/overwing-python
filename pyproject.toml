@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "overwing"
 version = "0.1.0"
-description = "Overwing SDK: guardrails for LLM output. Typed client for the Overwing API plus OpenAI Agents SDK guardrails that check every message before it ships."
+description = "Overwing SDK: guardrails for LLM output. Typed client for the Overwing API plus OpenAI Agents SDK guardrails and LangChain runnables/callbacks that check every message before it ships."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Overwing", email = "support@overwing.ai" }]
-keywords = ["overwing", "guardrails", "llm", "ai-safety", "content-moderation", "pii", "toxicity", "openai-agents", "agents"]
+keywords = ["overwing", "guardrails", "llm", "ai-safety", "content-moderation", "pii", "toxicity", "openai-agents", "langchain", "agents"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -27,6 +27,7 @@ dependencies = ["httpx>=0.27"]
 
 [project.optional-dependencies]
 agents = ["openai-agents>=0.1"]
+langchain = ["langchain-core>=0.3"]
 
 [project.urls]
 Homepage = "https://overwing.ai"
@@ -35,7 +36,13 @@ Repository = "https://github.com/frod27/overwing-python"
 Issues = "https://github.com/frod27/overwing-python/issues"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "openai-agents>=0.1", "mypy>=1.11"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "openai-agents>=0.1",
+    "mypy>=1.11",
+    "langchain-core>=1.6.4",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/overwing"]
