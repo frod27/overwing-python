@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "overwing"
-version = "0.2.0"
-description = "Overwing SDK: guardrails for LLM output. Typed client for the Overwing API plus OpenAI Agents SDK guardrails and LangChain runnables/callbacks that check every message before it ships."
+version = "0.3.0"
+description = "Overwing SDK: guardrails for LLM output, Atlas user-agent lookups (no key needed), and Tower clearance for agents operating legacy systems. Typed clients plus OpenAI Agents SDK guardrails and LangChain runnables."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Overwing", email = "support@overwing.ai" }]
-keywords = ["overwing", "guardrails", "llm", "ai-safety", "content-moderation", "pii", "toxicity", "openai-agents", "langchain", "agents"]
+keywords = ["overwing", "guardrails", "llm", "ai-safety", "content-moderation", "pii", "toxicity", "openai-agents", "langchain", "agents", "user-agent", "bot-detection", "legacy-systems"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",

@@ -1,98 +1,49 @@
 from __future__ import annotations
 
 import os
-import time
 from typing import Any
 
 import httpx
 
 from ._errors import OverwingError
-from ._types import BatchResult, Evaluation
+from ._http import DEFAULT_BASE_URL, AsyncHTTP, SyncHTTP, compact as _compact, query, segment
+from ._tower import AsyncTower, Tower
+from ._types import AtlasLookup, BatchResult, Evaluation, TowerAgent
 
-DEFAULT_BASE_URL = "https://overwing.ai"
-_USER_AGENT = "overwing-python/0.2.0"
+__all__ = ["DEFAULT_BASE_URL", "AsyncOverwing", "Overwing"]
 
 
-def _resolve(api_key: str | None, base_url: str | None) -> tuple[str, str]:
+def _api_key(api_key: str | None) -> str:
     key = api_key or os.environ.get("OVERWING_API_KEY")
     if not key:
         raise OverwingError("Overwing API key missing. Pass api_key= or set OVERWING_API_KEY. Get one at https://overwing.ai/login")
-    return key, (base_url or os.environ.get("OVERWING_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    return key
 
 
-def _error_from(res: httpx.Response) -> OverwingError:
-    try:
-        message = str(res.json().get("error", f"HTTP {res.status_code}"))
-    except ValueError:
-        message = f"HTTP {res.status_code}"
-    ra = res.headers.get("retry-after")
-    return OverwingError(message, res.status_code, float(ra) if ra else None)
+def _lookup_from(body: dict[str, Any], headers: dict[str, int | None]) -> AtlasLookup:
+    return AtlasLookup.from_dict(body, limit=headers.get("limit"), remaining=headers.get("remaining"))
 
 
-def _retryable(res: httpx.Response) -> bool:
-    if res.status_code == 429:
-        ra = res.headers.get("retry-after")
-        return ra is None or float(ra) <= 5
-    return res.status_code >= 500
+def _capture(into: dict[str, int | None]) -> Any:
+    def hook(headers: httpx.Headers) -> None:
+        lim, rem = headers.get("x-atlas-lookup-limit"), headers.get("x-atlas-lookup-remaining")
+        into["limit"] = int(lim) if lim is not None else None
+        into["remaining"] = int(rem) if rem is not None else None
+
+    return hook
 
 
-
-def _compact(body: dict[str, Any]) -> dict[str, Any]:
-    """Drop keys whose value is None so optional fields are omitted from the request."""
-    return {k: v for k, v in body.items() if v is not None}
-
-class _Base:
-    def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2) -> None:
-        self._api_key, self.base_url = _resolve(api_key, base_url)
-        self._timeout = timeout
-        self._max_retries = max_retries
-
-    def _headers(self, idempotency_key: str | None = None, json_body: bool = False) -> dict[str, str]:
-        h = {"Authorization": f"Bearer {self._api_key}", "Accept": "application/json", "User-Agent": _USER_AGENT}
-        if json_body:
-            h["Content-Type"] = "application/json"
-        if idempotency_key:
-            h["Idempotency-Key"] = idempotency_key
-        return h
-
-
-class Overwing(_Base):
-    """Synchronous client for the Overwing API."""
+class Overwing(SyncHTTP):
+    """Synchronous client for the Overwing API, as an organization."""
 
     def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.BaseTransport | None = None) -> None:
-        super().__init__(api_key, base_url=base_url, timeout=timeout, max_retries=max_retries)
-        self._http = httpx.Client(base_url=self.base_url, timeout=timeout, transport=transport)
-
-    def close(self) -> None:
-        self._http.close()
+        super().__init__(_api_key(api_key), base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
 
     def __enter__(self) -> "Overwing":
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
-
-    def _request(self, method: str, path: str, *, json: Any = None, idempotency_key: str | None = None, accept: tuple[int, ...] = ()) -> Any:
-        attempt = 0
-        while True:
-            try:
-                res = self._http.request(method, path, json=json, headers=self._headers(idempotency_key, json is not None))
-            except httpx.HTTPError as e:
-                if attempt < self._max_retries:
-                    attempt += 1
-                    time.sleep(0.25 * attempt)
-                    continue
-                raise OverwingError(f"Overwing API unreachable: {e}") from e
-            if res.status_code in accept:
-                return res.json()
-            if _retryable(res) and attempt < self._max_retries:
-                attempt += 1
-                ra = res.headers.get("retry-after")
-                time.sleep(float(ra) if ra else 0.3 * attempt)
-                continue
-            if res.is_error:
-                raise _error_from(res)
-            return res.json() if res.content else None
 
     def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
         """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). Raises OverwingError on any non-2xx."""
@@ -120,46 +71,48 @@ class Overwing(_Base):
     def me(self) -> dict[str, Any]:
         return self._request("GET", "/api/v1/me")
 
+    # ---- Overwing Atlas (this key's allowance; for keyless use, construct Atlas()) ----
 
-class AsyncOverwing(_Base):
-    """Asynchronous client for the Overwing API."""
+    def atlas_lookup(self, user_agent: str) -> AtlasLookup:
+        """Say what a User-Agent string claims to be and whether the claim can be trusted."""
+        seen: dict[str, int | None] = {}
+        return _lookup_from(self._request("GET", "/api/v1/atlas/lookup" + query({"user_agent": user_agent}), on_headers=_capture(seen)), seen)
+
+    # ---- Overwing Tower setup (agents operate through Tower(agent_key)) ----
+
+    def tower_load_template(self) -> dict[str, Any]:
+        """Load the starter workflow (email purchase order to order entry, mock IBM i). Idempotent."""
+        return self._request("POST", "/api/v1/tower/template", json={})
+
+    def tower_create_agent(self, name: str, scopes: list[str]) -> TowerAgent:
+        """Create a scoped agent identity. `.key` is returned once: store it, then pass it to Tower(agent_key)."""
+        return TowerAgent.from_dict(self._request("POST", "/api/v1/tower/agents", json={"name": name, "scopes": scopes}))
+
+    def tower_list_agents(self) -> list[TowerAgent]:
+        return [TowerAgent.from_dict(a) for a in self._request("GET", "/api/v1/tower/agents")["agents"]]
+
+    def tower_revoke_agent(self, agent_id: str) -> None:
+        """The agent's key stops working at once."""
+        self._request("DELETE", f"/api/v1/tower/agents/{segment(agent_id)}")
+
+    def tower_agent(self, name: str, scopes: list[str]) -> tuple[TowerAgent, Tower]:
+        """Create an agent and return it with a ready Tower client."""
+        agent = self.tower_create_agent(name, scopes)
+        assert agent.key is not None
+        return agent, Tower(agent.key, base_url=self.base_url, timeout=self._timeout, max_retries=self._max_retries, transport=self._transport)
+
+
+class AsyncOverwing(AsyncHTTP):
+    """Asynchronous client for the Overwing API, as an organization."""
 
     def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        super().__init__(api_key, base_url=base_url, timeout=timeout, max_retries=max_retries)
-        self._http = httpx.AsyncClient(base_url=self.base_url, timeout=timeout, transport=transport)
-
-    async def aclose(self) -> None:
-        await self._http.aclose()
+        super().__init__(_api_key(api_key), base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
 
     async def __aenter__(self) -> "AsyncOverwing":
         return self
 
     async def __aexit__(self, *exc: object) -> None:
         await self.aclose()
-
-    async def _request(self, method: str, path: str, *, json: Any = None, idempotency_key: str | None = None, accept: tuple[int, ...] = ()) -> Any:
-        import asyncio
-
-        attempt = 0
-        while True:
-            try:
-                res = await self._http.request(method, path, json=json, headers=self._headers(idempotency_key, json is not None))
-            except httpx.HTTPError as e:
-                if attempt < self._max_retries:
-                    attempt += 1
-                    await asyncio.sleep(0.25 * attempt)
-                    continue
-                raise OverwingError(f"Overwing API unreachable: {e}") from e
-            if res.status_code in accept:
-                return res.json()
-            if _retryable(res) and attempt < self._max_retries:
-                attempt += 1
-                ra = res.headers.get("retry-after")
-                await asyncio.sleep(float(ra) if ra else 0.3 * attempt)
-                continue
-            if res.is_error:
-                raise _error_from(res)
-            return res.json() if res.content else None
 
     async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
         return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": metadata, "context": context}), idempotency_key=idempotency_key))
@@ -184,3 +137,24 @@ class AsyncOverwing(_Base):
 
     async def me(self) -> dict[str, Any]:
         return await self._request("GET", "/api/v1/me")
+
+    async def atlas_lookup(self, user_agent: str) -> AtlasLookup:
+        seen: dict[str, int | None] = {}
+        return _lookup_from(await self._request("GET", "/api/v1/atlas/lookup" + query({"user_agent": user_agent}), on_headers=_capture(seen)), seen)
+
+    async def tower_load_template(self) -> dict[str, Any]:
+        return await self._request("POST", "/api/v1/tower/template", json={})
+
+    async def tower_create_agent(self, name: str, scopes: list[str]) -> TowerAgent:
+        return TowerAgent.from_dict(await self._request("POST", "/api/v1/tower/agents", json={"name": name, "scopes": scopes}))
+
+    async def tower_list_agents(self) -> list[TowerAgent]:
+        return [TowerAgent.from_dict(a) for a in (await self._request("GET", "/api/v1/tower/agents"))["agents"]]
+
+    async def tower_revoke_agent(self, agent_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/tower/agents/{segment(agent_id)}")
+
+    async def tower_agent(self, name: str, scopes: list[str]) -> tuple[TowerAgent, AsyncTower]:
+        agent = await self.tower_create_agent(name, scopes)
+        assert agent.key is not None
+        return agent, AsyncTower(agent.key, base_url=self.base_url, timeout=self._timeout, max_retries=self._max_retries, transport=self._transport)
