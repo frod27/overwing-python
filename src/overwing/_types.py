@@ -228,3 +228,54 @@ class TowerAgent:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "TowerAgent":
         return cls(agent_id=d["agent_id"], name=d.get("name", ""), scopes=list(d.get("scopes", [])), status=d.get("status", "active"), key=d.get("key"), raw=d)
+
+
+BeaconStatus = Literal["awaiting_payment", "running", "complete"]
+
+
+@dataclass(frozen=True)
+class BeaconCheck:
+    """One Beacon check: is a site reachable by agents? Branch on `status`; the report fields are set once it is complete."""
+
+    id: str
+    url: str
+    status: BeaconStatus
+    #: Where a person pays by card. Set while the check is awaiting payment.
+    checkout_url: str | None = None
+    #: 0 to 100.
+    score: int | None = None
+    #: "yes", "partly" or "no": is the product reachable by agents.
+    verdict: str | None = None
+    summary: str | None = None
+    #: find, read, use: each {"key", "title", "question", "answer", "points", "max"}.
+    categories: list[dict[str, Any]] = field(default_factory=list)
+    #: Each {"id", "category", "title", "status", "points", "max", "detail", "fix"?, "evidence"?}.
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    #: The three changes worth the most: each {"check", "fix", "gain"}.
+    top_fixes: list[dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def complete(self) -> bool:
+        return self.status == "complete"
+
+    @property
+    def awaiting_payment(self) -> bool:
+        """Nothing has run or been charged. A person pays at `checkout_url`."""
+        return self.status == "awaiting_payment"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BeaconCheck":
+        return cls(
+            id=d["id"],
+            url=d.get("url", ""),
+            status=d.get("status", "complete"),
+            checkout_url=d.get("checkout_url"),
+            score=d.get("score"),
+            verdict=d.get("verdict"),
+            summary=d.get("summary"),
+            categories=list(d.get("categories") or []),
+            checks=list(d.get("checks") or []),
+            top_fixes=list(d.get("top_fixes") or []),
+            raw=d,
+        )
