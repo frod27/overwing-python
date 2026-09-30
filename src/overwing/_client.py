@@ -58,17 +58,17 @@ class Overwing(SyncHTTP):
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). Raises OverwingError on any non-2xx.
+    def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, store: bool | None = None, idempotency_key: str | None = None) -> Evaluation:
+        """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). `store=False` runs the check without keeping the text or the context. Raises OverwingError on any non-2xx.
 
         With no key this uses the free allowance: 10 a day, inputs up to 2,000 characters, the prebuilt rule sets, and the
         text is not stored, so `metadata` and `idempotency_key` are not sent. `Evaluation.access` says what is left.
         """
-        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context}), idempotency_key=None if self.keyless else idempotency_key))
+        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context, "store": store}), idempotency_key=None if self.keyless else idempotency_key))
 
-    def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
+    def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, store: bool | None = None, idempotency_key: str | None = None) -> BatchResult:
         """Score up to 50 texts. Each item: {"input": str, "id"?: str, "metadata"?: dict, "context"?: dict}."""
-        return BatchResult.from_dict(self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context}), idempotency_key=idempotency_key, accept=(502,)))
+        return BatchResult.from_dict(self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context, "store": store}), idempotency_key=idempotency_key, accept=(502,)))
 
     def get_evaluation(self, evaluation_id: str) -> dict[str, Any]:
         return self._request("GET", f"/api/v1/evaluations/{evaluation_id}")
@@ -140,11 +140,11 @@ class AsyncOverwing(AsyncHTTP):
     async def __aexit__(self, *exc: object) -> None:
         await self.aclose()
 
-    async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context}), idempotency_key=None if self.keyless else idempotency_key))
+    async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, store: bool | None = None, idempotency_key: str | None = None) -> Evaluation:
+        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context, "store": store}), idempotency_key=None if self.keyless else idempotency_key))
 
-    async def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
-        return BatchResult.from_dict(await self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context}), idempotency_key=idempotency_key, accept=(502,)))
+    async def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, store: bool | None = None, idempotency_key: str | None = None) -> BatchResult:
+        return BatchResult.from_dict(await self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context, "store": store}), idempotency_key=idempotency_key, accept=(502,)))
 
     async def get_evaluation(self, evaluation_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/v1/evaluations/{evaluation_id}")

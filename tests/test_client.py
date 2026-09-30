@@ -40,6 +40,15 @@ def test_evaluate_sends_request(scripted):
     assert s.body() == {"input": "hello", "rule_set": "content-safety", "metadata": {"a": 1}}
 
 
+def test_store_false_is_sent_and_omitted_by_default(scripted):
+    s = scripted([(200, fake_evaluation("pass"), None), (200, fake_evaluation("pass"), None)])
+    with Overwing("ow_live_test", transport=s.transport()) as ow:
+        ow.evaluate("hello", store=False)
+        assert s.body()["store"] is False
+        ow.evaluate("hello")
+        assert "store" not in s.body(1)
+
+
 def test_retries_short_429_then_succeeds(scripted):
     s = scripted([(429, {"error": "slow"}, {"retry-after": "0"}), (200, fake_evaluation("fail"), None)])
     ow = Overwing("k", transport=s.transport())
