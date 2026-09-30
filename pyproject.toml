@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "overwing"
-version = "0.4.0"
+version = "0.5.0"
 description = "Overwing SDK: guardrails for LLM output, Atlas user-agent lookups (no key needed), and Tower clearance for agents operating legacy systems. Typed clients plus OpenAI Agents SDK guardrails and LangChain runnables."
 readme = "README.md"
 license = "MIT"
