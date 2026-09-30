@@ -4,10 +4,28 @@ from overwing import AsyncOverwing, Overwing, OverwingError
 from tests.conftest import fake_evaluation
 
 
-def test_requires_key(monkeypatch):
+def test_evaluates_with_no_key(monkeypatch, scripted):
     monkeypatch.delenv("OVERWING_API_KEY", raising=False)
-    with pytest.raises(OverwingError):
-        Overwing()
+    access = {"mode": "keyless", "daily_limit": 10, "remaining_today": 9, "input_stored": False}
+    s = scripted([(200, {**fake_evaluation("pass"), "access": access}, None)])
+    ow = Overwing(transport=s.transport())
+    assert ow.keyless is True
+    e = ow.evaluate("hello", rule_set="outbound-message", metadata={"a": 1}, context={"channel": "email"}, idempotency_key="k1")
+    assert e.access == access
+    req = s.calls[0]
+    assert "authorization" not in req.headers and "idempotency-key" not in req.headers
+    assert s.body() == {"input": "hello", "rule_set": "outbound-message", "context": {"channel": "email"}}
+
+
+def test_no_key_everything_else_raises_before_a_request(monkeypatch, scripted):
+    monkeypatch.delenv("OVERWING_API_KEY", raising=False)
+    s = scripted([(200, {}, None)])
+    ow = Overwing(transport=s.transport())
+    for call in (ow.usage, ow.list_rule_sets, lambda: ow.get_evaluation("eval_1"), lambda: ow.evaluate_batch([{"input": "x"}])):
+        with pytest.raises(OverwingError, match="signup"):
+            call()
+    assert s.calls == []
+    assert Overwing("ow_live_test", transport=s.transport()).keyless is False
 
 
 def test_evaluate_sends_request(scripted):

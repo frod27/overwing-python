@@ -13,11 +13,15 @@ from ._types import AtlasLookup, BatchResult, Evaluation, TowerAgent
 __all__ = ["DEFAULT_BASE_URL", "AsyncOverwing", "Overwing"]
 
 
-def _api_key(api_key: str | None) -> str:
-    key = api_key or os.environ.get("OVERWING_API_KEY")
-    if not key:
-        raise OverwingError("Overwing API key missing. Pass api_key= or set OVERWING_API_KEY. Get one at https://overwing.ai/login")
-    return key
+def _api_key(api_key: str | None) -> str | None:
+    """The key, or None: with no key, evaluate() uses the free allowance and everything else raises."""
+    return api_key or os.environ.get("OVERWING_API_KEY") or None
+
+
+def _require_key(token: str | None, method: str, path: str) -> None:
+    # Only a single evaluation works without a key. Say so here, before a request that would come back 401.
+    if token is None and not (method == "POST" and path == "/api/v1/evaluate"):
+        raise OverwingError("Overwing API key missing. Without a key only evaluate() works (10 a day). Pass api_key= or set OVERWING_API_KEY. POST https://overwing.ai/api/v1/signup issues a free key.")
 
 
 def _lookup_from(body: dict[str, Any], headers: dict[str, int | None]) -> AtlasLookup:
@@ -39,6 +43,15 @@ class Overwing(SyncHTTP):
     def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.BaseTransport | None = None) -> None:
         super().__init__(_api_key(api_key), base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
 
+    @property
+    def keyless(self) -> bool:
+        """True when no key is configured. evaluate() then uses the free allowance; every other method raises."""
+        return self._token is None
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        _require_key(self._token, method, path)
+        return super()._request(method, path, **kwargs)
+
     def __enter__(self) -> "Overwing":
         return self
 
@@ -46,8 +59,12 @@ class Overwing(SyncHTTP):
         self.close()
 
     def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). Raises OverwingError on any non-2xx."""
-        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": metadata, "context": context}), idempotency_key=idempotency_key))
+        """Score one text. `context` carries facts the rules may reference (recipient, channel, ownership). Raises OverwingError on any non-2xx.
+
+        With no key this uses the free allowance: 10 a day, inputs up to 2,000 characters, the prebuilt rule sets, and the
+        text is not stored, so `metadata` and `idempotency_key` are not sent. `Evaluation.access` says what is left.
+        """
+        return Evaluation.from_dict(self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context}), idempotency_key=None if self.keyless else idempotency_key))
 
     def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
         """Score up to 50 texts. Each item: {"input": str, "id"?: str, "metadata"?: dict, "context"?: dict}."""
@@ -108,6 +125,15 @@ class AsyncOverwing(AsyncHTTP):
     def __init__(self, api_key: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__(_api_key(api_key), base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
 
+    @property
+    def keyless(self) -> bool:
+        """True when no key is configured. evaluate() then uses the free allowance; every other method raises."""
+        return self._token is None
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        _require_key(self._token, method, path)
+        return await super()._request(method, path, **kwargs)
+
     async def __aenter__(self) -> "AsyncOverwing":
         return self
 
@@ -115,7 +141,7 @@ class AsyncOverwing(AsyncHTTP):
         await self.aclose()
 
     async def evaluate(self, text: str, *, rule_set: str = "content-safety", metadata: dict[str, Any] | None = None, context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> Evaluation:
-        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": metadata, "context": context}), idempotency_key=idempotency_key))
+        return Evaluation.from_dict(await self._request("POST", "/api/v1/evaluate", json=_compact({"input": text, "rule_set": rule_set, "metadata": None if self.keyless else metadata, "context": context}), idempotency_key=None if self.keyless else idempotency_key))
 
     async def evaluate_batch(self, items: list[dict[str, Any]], *, rule_set: str = "content-safety", context: dict[str, Any] | None = None, idempotency_key: str | None = None) -> BatchResult:
         return BatchResult.from_dict(await self._request("POST", "/api/v1/evaluate/batch", json=_compact({"rule_set": rule_set, "items": items, "context": context}), idempotency_key=idempotency_key, accept=(502,)))

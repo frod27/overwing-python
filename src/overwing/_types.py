@@ -33,6 +33,8 @@ class Evaluation:
     recommended_action: RecommendedAction
     results: list[RuleResult] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    #: Present only on an evaluation made with no key: what is left of the free allowance, and that the text was not stored.
+    access: dict[str, Any] | None = None
 
     @property
     def failed_rules(self) -> list[str]:
@@ -53,6 +55,7 @@ class Evaluation:
             recommended_action=d.get("recommended_action", "block" if d["verdict"] == "fail" else "review" if d["verdict"] == "review" else "allow"),
             results=[RuleResult.from_dict(r) for r in d.get("results", [])],
             raw=d,
+            access=d.get("access"),
         )
 
 

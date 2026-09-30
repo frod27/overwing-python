@@ -25,7 +25,9 @@ pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
 pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
 
-Get a free API key at [overwing.ai](https://overwing.ai/login) (250 evaluations a day), or let your agent sign itself up with one `POST` to `/api/v1/signup`. Try it first with no key: paste anything into the console at [overwing.ai](https://overwing.ai).
+It works with no key: `Overwing().evaluate(text)` runs 10 evaluations a day on inputs up to 2,000 characters, and text sent without a key is not stored. For more, get a free API key at [overwing.ai](https://overwing.ai/login) (250 evaluations a day), or let your agent sign itself up with one `POST` to `/api/v1/signup`.
+
+The text can be in any language. It was tested on 2026-09-29 in Spanish, Portuguese, French, German, Japanese, Simplified Chinese, Korean, Arabic and Hindi: a small test, not a benchmark. Results come back in English.
 
 ## OpenAI Agents SDK guardrails
 
@@ -136,7 +138,7 @@ Also on the agent client: `decide` (a ruling with no side effects), `submit(...,
 ```python
 from overwing import Overwing, AsyncOverwing
 
-ow = Overwing()   # or Overwing(api_key="ow_live_...")
+ow = Overwing()   # reads OVERWING_API_KEY; with no key, evaluate() uses the free allowance
 
 e = ow.evaluate("Reach me at dana@example.com to sort out the refund.")
 e.verdict              # "fail"
@@ -169,6 +171,7 @@ Each rule has a fail condition, an optional review threshold, and a weight. The 
 ## Also from Overwing
 
 - [`overwing`](https://github.com/frod27/overwing-js) on npm: the same client, a Vercel AI SDK middleware, and Agents SDK guardrails for JavaScript.
-- [`overwing-mcp`](https://github.com/frod27/overwing-mcp): the guardrails as MCP tools for Claude, Cursor, and any MCP client.
+- MCP: the same tools for Claude, Cursor and any MCP client, hosted at `https://overwing.ai/mcp` with no install, or from npm as [`overwing-mcp`](https://github.com/frod27/overwing-mcp).
+- A2A: `https://overwing.ai/a2a` answers "send message" for evaluations and User-Agent lookups.
 
 MIT © Overwing. Verdicts are produced by TypeSafe's Jev System One model; Overwing is not affiliated with TypeSafe.
