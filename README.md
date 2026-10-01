@@ -98,27 +98,28 @@ Read `verification` before you act on the claim. `who.signed` is true only when 
 
 `atlas.agents(purpose=..., operator=..., verification=..., q=..., limit=...)` searches the registry and `atlas.summary()` returns traffic shares and field-scan headlines. `AsyncAtlas` is the async twin. With an API key, `Overwing().atlas_lookup(...)` does the same lookup.
 
-## Beacon: is your product reachable by agents? (no key needed)
+## Beacon: is your product reachable by agents? (free)
 
-[Overwing Beacon](https://overwing.ai/beacon) checks one site and answers three questions: can an agent find it, read it, and use it. It looks for robots.txt rules for AI agents, llms.txt, an MCP server card and endpoint, an A2A agent card and an OpenAPI document, and reads the home page the way an agent does. One check costs $5 by card or $1 over x402.
+[Overwing Beacon](https://overwing.ai/beacon) checks one site and answers three questions: can an agent find it, read it, and use it. It looks for robots.txt rules for AI agents, llms.txt, an MCP server card and endpoint, an A2A agent card and an OpenAPI document, and reads the home page the way an agent does. A check is free: with a key you get the full report, saved to your dashboard; with no key you get the summary (the score, the three answers and the first fix).
 
 ```python
 from overwing import Beacon
 
-beacon = Beacon()
-beacon.sample().top_fixes                 # a real report, free, to see the shape
+beacon = Beacon()                         # api_key= or OVERWING_API_KEY for the full report
+beacon.sample().top_fixes                 # a real report in full, to see the shape
 
 check = beacon.start("example.com")
-check.checkout_url                        # a person pays $5 here; nothing runs until then
-check = beacon.wait_for_report(check.id)  # polls: awaiting_payment, running, complete
+check = beacon.wait_for_report(check.id)  # the first read runs the check
 if check.complete:
     check.score        # 0 to 100
     check.verdict      # "yes" | "partly" | "no"
     check.categories   # find, read, use, each with an answer
     check.top_fixes    # [{"check", "fix", "gain"}], most valuable first
+    check.full         # False with no key: the summary, with check.counts
+    check.checks       # every check, with what was found and a fix (full report)
 ```
 
-An agent with a wallet skips the checkout: pass `beacon.x402_url("example.com")` to any x402 client, pay $1 in USDC, and the report is the response. `AsyncBeacon` is the async twin.
+A key is free: `POST https://overwing.ai/api/v1/signup` returns one. An agent with a wallet and no account can pass `beacon.x402_url("example.com")` to any x402 client, pay $1 in USDC, and get the full report as the response. `AsyncBeacon` is the async twin.
 
 ## Tower: let an agent operate a legacy system
 

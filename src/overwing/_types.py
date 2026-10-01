@@ -230,7 +230,7 @@ class TowerAgent:
         return cls(agent_id=d["agent_id"], name=d.get("name", ""), scopes=list(d.get("scopes", [])), status=d.get("status", "active"), key=d.get("key"), raw=d)
 
 
-BeaconStatus = Literal["awaiting_payment", "running", "complete"]
+BeaconStatus = Literal["queued", "running", "complete"]
 
 
 @dataclass(frozen=True)
@@ -240,8 +240,10 @@ class BeaconCheck:
     id: str
     url: str
     status: BeaconStatus
-    #: Where a person pays by card. Set while the check is awaiting payment.
-    checkout_url: str | None = None
+    #: "full" or "summary". The summary (no key) has no `checks` and only the first of `top_fixes`.
+    access: str | None = None
+    #: In a summary: how many checks the full report holds, {"checks", "pass", "gaps", "missing", "fixes"}.
+    counts: dict[str, int] | None = None
     #: 0 to 100.
     score: int | None = None
     #: "yes", "partly" or "no": is the product reachable by agents.
@@ -249,9 +251,9 @@ class BeaconCheck:
     summary: str | None = None
     #: find, read, use: each {"key", "title", "question", "answer", "points", "max"}.
     categories: list[dict[str, Any]] = field(default_factory=list)
-    #: Each {"id", "category", "title", "status", "points", "max", "detail", "fix"?, "evidence"?}.
+    #: Each {"id", "category", "title", "status", "points", "max", "detail", "fix"?, "evidence"?}. Empty in a summary.
     checks: list[dict[str, Any]] = field(default_factory=list)
-    #: The three changes worth the most: each {"check", "fix", "gain"}.
+    #: The three changes worth the most: each {"check", "fix", "gain"}. A summary has the first.
     top_fixes: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -260,9 +262,9 @@ class BeaconCheck:
         return self.status == "complete"
 
     @property
-    def awaiting_payment(self) -> bool:
-        """Nothing has run or been charged. A person pays at `checkout_url`."""
-        return self.status == "awaiting_payment"
+    def full(self) -> bool:
+        """The full report, not the summary. False until the check is complete."""
+        return self.complete and self.access != "summary"
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "BeaconCheck":
@@ -270,7 +272,8 @@ class BeaconCheck:
             id=d["id"],
             url=d.get("url", ""),
             status=d.get("status", "complete"),
-            checkout_url=d.get("checkout_url"),
+            access=d.get("access"),
+            counts=d.get("counts"),
             score=d.get("score"),
             verdict=d.get("verdict"),
             summary=d.get("summary"),
