@@ -8,7 +8,7 @@ import httpx
 from ._errors import OverwingError
 from ._http import DEFAULT_BASE_URL, AsyncHTTP, SyncHTTP, compact as _compact, query, segment
 from ._tower import AsyncTower, Tower
-from ._types import AtlasLookup, BatchResult, Evaluation, TowerAgent
+from ._types import Account, AtlasLookup, BatchResult, DomainProof, Evaluation, TowerAgent
 
 __all__ = ["DEFAULT_BASE_URL", "AsyncOverwing", "Overwing"]
 
@@ -21,7 +21,7 @@ def _api_key(api_key: str | None) -> str | None:
 def _require_key(token: str | None, method: str, path: str) -> None:
     # Only a single evaluation works without a key. Say so here, before a request that would come back 401.
     if token is None and not (method == "POST" and path == "/api/v1/evaluate"):
-        raise OverwingError("Overwing API key missing. Without a key only evaluate() works (10 a day). Pass api_key= or set OVERWING_API_KEY. POST https://overwing.ai/api/v1/signup issues a free key.")
+        raise OverwingError("Overwing API key missing. Without a key only evaluate() works (10 a day). Pass api_key= or set OVERWING_API_KEY. Overwing.signup() makes an account with no email.")
 
 
 def _lookup_from(body: dict[str, Any], headers: dict[str, int | None]) -> AtlasLookup:
@@ -51,6 +51,56 @@ class Overwing(SyncHTTP):
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         _require_key(self._token, method, path)
         return super()._request(method, path, **kwargs)
+
+    @classmethod
+    def signup(cls, org_name: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.BaseTransport | None = None) -> tuple[Account, "Overwing"]:
+        """Create an account with no email, and a client that uses it. Nothing is sent to anyone.
+
+        The key is the account: store `account.api_key` at once, since with no email there is no reset link.
+        It starts at 50 evaluations a day; `prove_domain` raises that and makes the key recoverable.
+
+            account, ow = Overwing.signup()
+        """
+        http = SyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            account = Account.from_dict(SyncHTTP._request(http, "POST", "/api/v1/signup", json={"org_name": org_name} if org_name else {}))
+        finally:
+            if transport is None:
+                http.close()
+        return account, cls(account.api_key, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+
+    @classmethod
+    def start_recovery(cls, domain: str, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.BaseTransport | None = None) -> DomainProof:
+        """Key lost? Begin recovering an account made with no email, by the domain it proved. No key needed. Publish the value at the domain, then call `finish_recovery`."""
+        http = SyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            return DomainProof.from_dict(SyncHTTP._request(http, "POST", "/api/v1/signup/recover", json={"domain": domain}))
+        finally:
+            if transport is None:
+                http.close()
+
+    @classmethod
+    def finish_recovery(cls, domain: str, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.BaseTransport | None = None) -> tuple[Account, "Overwing"]:
+        """Finish a recovery: every old key is revoked and one new key is returned, once. Raises OverwingError (status 422) while the proof is not at the domain."""
+        http = SyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            account = Account.from_dict(SyncHTTP._request(http, "POST", "/api/v1/signup/recover/verify", json={"domain": domain}))
+        finally:
+            if transport is None:
+                http.close()
+        return account, cls(account.api_key, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+
+    def prove_domain(self, domain: str) -> DomainProof:
+        """Begin proving that the account controls a domain. Publish the value it returns there, then call `verify_domain`."""
+        return DomainProof.from_dict(self._request("POST", "/api/v1/org/domain", json={"domain": domain}))
+
+    def verify_domain(self) -> DomainProof:
+        """Look for the proof. Not there yet: `verified` is False and `error` says what was looked for; asking again is safe."""
+        return DomainProof.from_dict(self._request("POST", "/api/v1/org/domain/verify", accept=(422,)))
+
+    def claim(self, email: str, password: str) -> dict[str, Any]:
+        """A person takes charge of an account made with no email: attaches a login. They get a confirmation message."""
+        return self._request("POST", "/api/v1/org/claim", json={"email": email, "password": password})
 
     def __enter__(self) -> "Overwing":
         return self
@@ -133,6 +183,45 @@ class AsyncOverwing(AsyncHTTP):
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         _require_key(self._token, method, path)
         return await super()._request(method, path, **kwargs)
+
+    @classmethod
+    async def signup(cls, org_name: str | None = None, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None) -> tuple[Account, "AsyncOverwing"]:
+        """Create an account with no email, and a client that uses it. See `Overwing.signup`."""
+        http = AsyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            account = Account.from_dict(await AsyncHTTP._request(http, "POST", "/api/v1/signup", json={"org_name": org_name} if org_name else {}))
+        finally:
+            if transport is None:
+                await http.aclose()
+        return account, cls(account.api_key, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+
+    @classmethod
+    async def start_recovery(cls, domain: str, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None) -> DomainProof:
+        http = AsyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            return DomainProof.from_dict(await AsyncHTTP._request(http, "POST", "/api/v1/signup/recover", json={"domain": domain}))
+        finally:
+            if transport is None:
+                await http.aclose()
+
+    @classmethod
+    async def finish_recovery(cls, domain: str, *, base_url: str | None = None, timeout: float = 15.0, max_retries: int = 2, transport: httpx.AsyncBaseTransport | None = None) -> tuple[Account, "AsyncOverwing"]:
+        http = AsyncHTTP(None, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+        try:
+            account = Account.from_dict(await AsyncHTTP._request(http, "POST", "/api/v1/signup/recover/verify", json={"domain": domain}))
+        finally:
+            if transport is None:
+                await http.aclose()
+        return account, cls(account.api_key, base_url=base_url, timeout=timeout, max_retries=max_retries, transport=transport)
+
+    async def prove_domain(self, domain: str) -> DomainProof:
+        return DomainProof.from_dict(await self._request("POST", "/api/v1/org/domain", json={"domain": domain}))
+
+    async def verify_domain(self) -> DomainProof:
+        return DomainProof.from_dict(await self._request("POST", "/api/v1/org/domain/verify", accept=(422,)))
+
+    async def claim(self, email: str, password: str) -> dict[str, Any]:
+        return await self._request("POST", "/api/v1/org/claim", json={"email": email, "password": password})
 
     async def __aenter__(self) -> "AsyncOverwing":
         return self

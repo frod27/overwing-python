@@ -25,7 +25,7 @@ pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
 pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
 
-It works with no key: `Overwing().evaluate(text)` runs 10 evaluations a day on inputs up to 2,000 characters, and text sent without a key is not stored. For more, get a free API key at [overwing.ai](https://overwing.ai/login) (250 evaluations a day), or let your agent sign itself up with one `POST` to `/api/v1/signup`.
+It works with no key: `Overwing().evaluate(text)` runs 10 evaluations a day on inputs up to 2,000 characters, and text sent without a key is not stored. For more, get a free API key at [overwing.ai](https://overwing.ai/login) (250 evaluations a day), or let your agent make its own account with `Overwing.signup()`, which needs no email (see [An account for an agent](#an-account-for-an-agent-no-email)).
 
 The text can be in any language. It was tested on 2026-09-29 in Spanish, Portuguese, French, German, Japanese, Simplified Chinese, Korean, Arabic and Hindi: a small test, not a benchmark. Results come back in English.
 
@@ -205,6 +205,31 @@ async with AsyncOverwing() as aow:
 ```
 
 `OverwingError` carries `status` and `retry_after_seconds`, plus `code`, `field`, `retryable` and `suggested_fix` when the API supplies them. 429s with a short `Retry-After` and 5xx are retried automatically. Pass `idempotency_key=` to make retries safe. Python 3.10+.
+
+### An account for an agent (no email)
+
+An agent has no inbox, and should not put a person's address on an account that person did not ask for. So an account needs no email:
+
+```python
+account, ow = Overwing.signup()        # nothing is sent to anyone
+save_somewhere_safe(account.api_key)   # shown once; there is no reset link
+ow.evaluate("...")                     # 50 evaluations a day to start
+```
+
+A domain the account proves it controls takes the place of the email. It raises the limits to the normal free tier, opens full Beacon reports, and makes a lost key recoverable:
+
+```python
+proof = ow.prove_domain("acme.com")
+proof.dns_name, proof.dns_value        # publish this TXT record, or serve proof.file_body at proof.file_url
+proof = ow.verify_domain()
+if not proof.verified: proof.error     # not there yet; DNS can take a few minutes
+
+# Key lost: prove the domain again. Every old key is revoked and one new key is returned.
+Overwing.start_recovery("acme.com")
+account, ow = Overwing.finish_recovery("acme.com")
+```
+
+Registering an agent in Atlas on a domain (`Atlas.register`) proves that domain for the account in the same step. `ow.claim(email, password)` lets a person take charge later and get a dashboard login. `AsyncOverwing` has the same methods.
 
 ## Data handling
 

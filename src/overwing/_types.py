@@ -231,6 +231,49 @@ class TowerAgent:
 
 
 @dataclass(frozen=True)
+class Account:
+    """An account made with no email, or a key recovered for one. `api_key` is shown once: store it."""
+
+    org_id: str
+    api_key: str = field(repr=False)
+    #: Evaluations a day. 50 until a domain is proved.
+    daily_limit: int | None = None
+    #: Keys that stopped working, after a recovery.
+    revoked_keys: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Account":
+        return cls(org_id=d["org_id"], api_key=d["api_key"], daily_limit=d.get("daily_limit"), revoked_keys=d.get("revoked_keys"), raw=d)
+
+
+@dataclass(frozen=True)
+class DomainProof:
+    """A domain proof for an account. While it is pending, `dns_*` and `file_*` hold the one value to publish at the domain."""
+
+    domain: str | None
+    #: "pending_verification" or "verified".
+    status: str
+    dns_name: str | None = None
+    dns_value: str | None = None
+    file_url: str | None = None
+    file_body: str | None = None
+    #: Set when the proof was looked for and not found: what was looked for.
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def verified(self) -> bool:
+        return self.status == "verified"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "DomainProof":
+        v = d.get("verification") or {}
+        dns, http = v.get("dns") or {}, v.get("http") or {}
+        return cls(domain=d.get("domain"), status=d.get("status") or "pending_verification", dns_name=dns.get("name"), dns_value=dns.get("value"), file_url=http.get("url"), file_body=http.get("body"), error=d.get("error"), raw=d)
+
+
+@dataclass(frozen=True)
 class AtlasRegistration:
     """An agent you registered in Atlas. While it is unverified, `dns_*` and `file_*` hold the one value to publish at the domain."""
 

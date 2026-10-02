@@ -6,11 +6,13 @@ from ._client import AsyncOverwing, Overwing
 from ._errors import OverwingError
 from ._http import SDK_VERSION as __version__
 from ._tower import AsyncTower, Tower
-from ._types import AtlasLookup, AtlasRegistration, BatchResult, BeaconCheck, Evaluation, RecommendedAction, RuleAction, RuleResult, TowerAction, TowerAgent, TowerDecision, Verdict
+from ._types import Account, AtlasLookup, AtlasRegistration, BatchResult, DomainProof, BeaconCheck, Evaluation, RecommendedAction, RuleAction, RuleResult, TowerAction, TowerAgent, TowerDecision, Verdict
 
 __all__ = [
     "AsyncAtlas",
+    "Account",
     "AsyncBeacon",
+    "DomainProof",
     "AtlasRegistration",
     "AsyncOverwing",
     "AsyncTower",
