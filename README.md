@@ -98,6 +98,25 @@ Read `verification` before you act on the claim. `who.signed` is true only when 
 
 `atlas.agents(purpose=..., operator=..., verification=..., q=..., limit=...)` searches the registry and `atlas.summary()` returns traffic shares and field-scan headlines. `AsyncAtlas` is the async twin. With an API key, `Overwing().atlas_lookup(...)` does the same lookup.
 
+### Register your own agent
+
+If you run an agent or a crawler, add it to the registry so a lookup of its User-Agent names you. It is free and needs an API key.
+
+```python
+atlas = Atlas()   # OVERWING_API_KEY, or Atlas("ow_live_...")
+
+reg = atlas.register("AcmeBot", operator="Acme, Inc.", domain="acme.com", tokens=["AcmeBot"], purpose="user_fetch")
+reg.dns_name, reg.dns_value    # the TXT record: _overwing-atlas.acme.com, overwing-atlas-verification=...
+reg.file_url, reg.file_body    # or serve the same value at https://acme.com/.well-known/overwing-atlas.txt
+
+# publish either one, then:
+reg = atlas.verify_registration(reg.id)
+if reg.published: ...          # in the registry
+elif reg.pending_verification: reg.error   # not found yet: what was looked for
+```
+
+`atlas.registrations()` lists yours and `atlas.withdraw_registration(id)` takes one out. Registration proves control of the operator's domain. A User-Agent is still a string anyone can send, so the entry is listed as user-agent only unless `key_directory_url` is a Web Bot Auth key directory on that domain.
+
 ## Beacon: is your product reachable by agents? (free)
 
 [Overwing Beacon](https://overwing.ai/beacon) checks one site and answers three questions: can an agent find it, read it, and use it. It looks for robots.txt rules for AI agents, llms.txt, an MCP server card and endpoint, an A2A agent card and an OpenAPI document, and reads the home page the way an agent does. A check is free: with a key you get the full report, saved to your dashboard; with no key you get the summary (the score, the three answers and the first fix).

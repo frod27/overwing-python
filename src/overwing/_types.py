@@ -230,6 +230,62 @@ class TowerAgent:
         return cls(agent_id=d["agent_id"], name=d.get("name", ""), scopes=list(d.get("scopes", [])), status=d.get("status", "active"), key=d.get("key"), raw=d)
 
 
+@dataclass(frozen=True)
+class AtlasRegistration:
+    """An agent you registered in Atlas. While it is unverified, `dns_*` and `file_*` hold the one value to publish at the domain."""
+
+    id: str
+    #: "pending_verification", "pending_review", "published", "rejected" or "withdrawn".
+    status: str
+    name: str = ""
+    operator: str = ""
+    domain: str = ""
+    tokens: list[str] = field(default_factory=list)
+    #: Why it is waiting for a person, or why it was not accepted.
+    note: str | None = None
+    #: The TXT record to publish: its name and value.
+    dns_name: str | None = None
+    dns_value: str | None = None
+    #: Or the file to serve: its address and content.
+    file_url: str | None = None
+    file_body: str | None = None
+    #: Once published: the registry entry.
+    agent: str | None = None
+    #: Set by `verify_registration` when the proof was not found: what was looked for.
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def published(self) -> bool:
+        return self.status == "published"
+
+    @property
+    def pending_verification(self) -> bool:
+        """The proof has not been found at the domain yet."""
+        return self.status == "pending_verification"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any], *, error: str | None = None) -> "AtlasRegistration":
+        v = d.get("verification") or {}
+        dns, http = v.get("dns") or {}, v.get("http") or {}
+        return cls(
+            id=d["id"],
+            status=d.get("status", ""),
+            name=d.get("name", ""),
+            operator=d.get("operator", ""),
+            domain=d.get("domain", ""),
+            tokens=list(d.get("tokens") or []),
+            note=d.get("note"),
+            dns_name=dns.get("name"),
+            dns_value=dns.get("value"),
+            file_url=http.get("url"),
+            file_body=http.get("body"),
+            agent=d.get("agent"),
+            error=error,
+            raw=d,
+        )
+
+
 BeaconStatus = Literal["queued", "running", "complete"]
 
 
