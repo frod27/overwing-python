@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._types import PreflightVerdict
 
 
 class OverwingError(Exception):
@@ -31,3 +34,15 @@ class OverwingError(Exception):
         self.retryable = retryable
         self.suggested_fix = suggested_fix
         self.body = body
+
+
+class PreflightRefused(OverwingError):
+    """Preflight answered, and the answer was not "allow". Do not sign.
+
+    `verdict` is the whole answer: `verdict.reasons` says why, each with a `code` and a `detail`.
+    """
+
+    def __init__(self, verdict: "PreflightVerdict") -> None:
+        detail = "; ".join(str(r.get("detail") or r.get("code")) for r in verdict.reasons) or f"decision {verdict.decision!r}"
+        super().__init__(f"Preflight refused this transaction ({detail}) · {verdict.id}", code="preflight_refused", retryable=False, body=verdict.raw)
+        self.verdict = verdict
