@@ -8,7 +8,7 @@
 </p>
 
 <p align="center"><strong>Guardrails for LLM output, in one line.</strong><br>
-OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed client. Also: <a href="#atlas-who-is-this-user-agent-no-key-needed">Atlas</a> user-agent lookups with no key, and <a href="#tower-let-an-agent-operate-a-legacy-system">Tower</a> for agents operating legacy systems. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
+OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed client. Also: <a href="#atlas-who-is-this-user-agent-no-key-needed">Atlas</a> user-agent lookups with no key, <a href="#preflight-should-the-agent-sign-this-solana-transaction">Preflight</a> checks before an agent signs a Solana transaction, and <a href="#tower-let-an-agent-operate-a-legacy-system">Tower</a> for agents operating legacy systems. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
 
 <p align="center">
   <a href="https://pypi.org/project/overwing/"><img alt="PyPI" src="https://img.shields.io/pypi/v/overwing?color=0B1220&label=overwing"></a>
@@ -20,7 +20,7 @@ OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed cli
 ---
 
 ```bash
-pip install overwing               # client, Atlas, Tower
+pip install overwing               # client, Atlas, Beacon, Preflight, Tower
 pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
 pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
@@ -139,6 +139,48 @@ if check.complete:
 ```
 
 A key is free: `POST https://overwing.ai/api/v1/signup` returns one. An agent with a wallet and no account can pass `beacon.x402_url("example.com")` to any x402 client, pay $1 in USDC, and get the full report as the response. `AsyncBeacon` is the async twin.
+
+## Preflight: should the agent sign this Solana transaction?
+
+[Overwing Preflight](https://overwing.ai/preflight) checks one unsigned Solana transaction against your policy before the agent signs it. It simulates the transaction against the chain as it is now, works out what it would take from the wallet you name, and answers `allow` or `refuse` with every reason. It never sees a private key and never sends anything to the chain.
+
+The check only protects a wallet when it sits in the signing path, so put it there. `guarded_sign` calls your signing function only after an allow:
+
+```python
+from overwing import Preflight
+from overwing.solana import guarded_sign, PreflightRefused
+
+preflight = Preflight()                    # OVERWING_API_KEY
+policy = {
+    "wallet": str(keypair.pubkey()),       # the address to protect; it must sign the transaction
+    "max_sol_out": 0.05,                   # the most SOL that may leave, fees included
+    # optional: "max_token_out", "min_token_in", "allowed_programs", "allow_delegation"
+}
+
+try:
+    signed = guarded_sign(preflight, sign, tx, policy)   # sign(tx) runs only after an allow
+except PreflightRefused as e:
+    e.verdict.reasons                      # [{"code": "sol_out_exceeds_limit", "detail": "..."}]: do not sign
+```
+
+`tx` is the serialized transaction as base64 text, as `bytes`, or as any object `bytes()` can serialize, which a solders transaction is. No Solana library is installed or needed. Your signing function gets the same object that was checked.
+
+It fails closed. A refusal raises `PreflightRefused`, which carries the verdict. No verdict at all (the API unreachable, a timeout, a 5xx, an answer that cannot be read) raises `OverwingError`. In both cases the signing function is never called. `on_unavailable="allow"` signs anyway when there is no verdict and logs a warning; a refusal, a rejected request (400, 401) and a spent allowance (429) still raise.
+
+`require_allow(preflight, tx, policy)` is the check alone: it returns the verdict on an allow and raises otherwise. A verdict describes the chain for `verdict.valid_for_seconds` (120), so sign and send at once. With an async client use `guarded_sign_async` and `require_allow_async`.
+
+```python
+verdict = preflight.check(tx, policy)      # returns for allow and for refuse; branch on verdict.allowed
+verdict.effects                            # what the simulation says would leave and arrive
+verdict.covered, verdict.receipt           # inside the guarantee or not, and the signed receipt
+
+preflight.report(verdict.id, signature)    # after it lands: .outcome is "miss" or "not_a_miss"
+preflight.verdict(verdict.id)              # the public record of one verdict (no key)
+preflight.record()                         # totals, misses and the latest verdicts (no key)
+preflight.overview()                       # policy fields, reason codes, prices (no key)
+```
+
+One check counts as one evaluation. `AsyncPreflight` is the async twin, and `Overwing` and `AsyncOverwing` have the same calls as `preflight_check`, `preflight_verdict`, `preflight_report`, `preflight_record` and `preflight_overview`. An agent with a wallet and no account can post the same body to `preflight.x402_url()` with any x402 client for $0.01 in USDC.
 
 ## Tower: let an agent operate a legacy system
 

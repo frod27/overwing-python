@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Mapping
 
 import httpx
 
 from ._errors import OverwingError
 from ._http import DEFAULT_BASE_URL, AsyncHTTP, SyncHTTP, compact as _compact, query, segment
+from . import _preflight as _pf
 from ._tower import AsyncTower, Tower
-from ._types import Account, AtlasLookup, BatchResult, DomainProof, Evaluation, TowerAgent
+from ._types import Account, AtlasLookup, BatchResult, DomainProof, Evaluation, PreflightRecord, PreflightReport, PreflightVerdict, TowerAgent
 
 __all__ = ["DEFAULT_BASE_URL", "AsyncOverwing", "Overwing"]
 
@@ -145,6 +146,28 @@ class Overwing(SyncHTTP):
         seen: dict[str, int | None] = {}
         return _lookup_from(self._request("GET", "/api/v1/atlas/lookup" + query({"user_agent": user_agent}), on_headers=_capture(seen)), seen)
 
+    # ---- Overwing Preflight (should the agent sign this Solana transaction? see overwing.solana) ----
+
+    def preflight_check(self, transaction: _pf.Transaction, policy: Mapping[str, Any]) -> PreflightVerdict:
+        """Check one unsigned Solana transaction against a policy. Sign only when `verdict.allowed`. See `Preflight.check`."""
+        return PreflightVerdict.from_dict(self._request("POST", _pf._CHECKS, json=_pf.check_body(transaction, policy)))
+
+    def preflight_verdict(self, check_id: str) -> PreflightVerdict:
+        """The public record of one verdict, with the transactions reported against it."""
+        return PreflightVerdict.from_dict(self._request("GET", _pf.verdict_path(check_id)))
+
+    def preflight_report(self, check_id: str, signature: str) -> PreflightReport:
+        """Report the landed transaction (its base58 signature) against a verdict."""
+        return PreflightReport.from_dict(self._request("POST", _pf.report_path(check_id), json={"signature": signature}))
+
+    def preflight_record(self) -> PreflightRecord:
+        """The public record: totals, misses, the latest verdicts and the reserve."""
+        return PreflightRecord.from_dict(self._request("GET", _pf._RECORD))
+
+    def preflight_overview(self) -> dict[str, Any]:
+        """The policy fields, the reason codes, the prices and the endpoints."""
+        return self._request("GET", _pf._OVERVIEW)
+
     # ---- Overwing Tower setup (agents operate through Tower(agent_key)) ----
 
     def tower_load_template(self) -> dict[str, Any]:
@@ -256,6 +279,23 @@ class AsyncOverwing(AsyncHTTP):
     async def atlas_lookup(self, user_agent: str) -> AtlasLookup:
         seen: dict[str, int | None] = {}
         return _lookup_from(await self._request("GET", "/api/v1/atlas/lookup" + query({"user_agent": user_agent}), on_headers=_capture(seen)), seen)
+
+    # ---- Overwing Preflight ----
+
+    async def preflight_check(self, transaction: _pf.Transaction, policy: Mapping[str, Any]) -> PreflightVerdict:
+        return PreflightVerdict.from_dict(await self._request("POST", _pf._CHECKS, json=_pf.check_body(transaction, policy)))
+
+    async def preflight_verdict(self, check_id: str) -> PreflightVerdict:
+        return PreflightVerdict.from_dict(await self._request("GET", _pf.verdict_path(check_id)))
+
+    async def preflight_report(self, check_id: str, signature: str) -> PreflightReport:
+        return PreflightReport.from_dict(await self._request("POST", _pf.report_path(check_id), json={"signature": signature}))
+
+    async def preflight_record(self) -> PreflightRecord:
+        return PreflightRecord.from_dict(await self._request("GET", _pf._RECORD))
+
+    async def preflight_overview(self) -> dict[str, Any]:
+        return await self._request("GET", _pf._OVERVIEW)
 
     async def tower_load_template(self) -> dict[str, Any]:
         return await self._request("POST", "/api/v1/tower/template", json={})

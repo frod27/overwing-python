@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ._errors import OverwingError
+
 Verdict = Literal["pass", "fail", "review"]
 RuleAction = Literal["block", "redact", "review"]
 RecommendedAction = Literal["block", "redact", "review", "allow"]
@@ -381,3 +383,128 @@ class BeaconCheck:
             top_fixes=list(d.get("top_fixes") or []),
             raw=d,
         )
+
+
+def _malformed(what: str, d: Any) -> OverwingError:
+    return OverwingError(f"Overwing Preflight answered with {what}. Treat it as no verdict: do not sign.", code="malformed_response", body=d)
+
+
+@dataclass(frozen=True)
+class PreflightVerdict:
+    """One Preflight verdict on one Solana transaction. Sign only when `allowed`; anything else means do not sign."""
+
+    id: str
+    #: "allow" or "refuse". Any other value is not an allow.
+    decision: str
+    #: Why it was refused: each {"code", "detail"}. Empty on an allow.
+    reasons: list[dict[str, Any]] = field(default_factory=list)
+    #: What the simulation says would leave and arrive: {"sol_out_lamports", "token_out", "token_in", "control"}.
+    effects: dict[str, Any] | None = None
+    #: Every program the transaction runs, top-level or inner.
+    programs: list[str] = field(default_factory=list)
+    #: Hex digest of the transaction that was checked.
+    digest: str | None = None
+    slot: int | None = None
+    #: Whether an allow is inside the guarantee (every program it runs is a covered one).
+    covered: bool = False
+    decided_at: str | None = None
+    #: How long the verdict describes the chain for. Sign and send at once, or check again.
+    valid_for_seconds: int | None = None
+    #: The signed receipt: {"payload", "payload_hash", "signature", "signing_key_id", "public_key"}.
+    receipt: dict[str, Any] | None = None
+    record_url: str | None = None
+    if_it_goes_wrong: str | None = None
+    #: On a verdict read from the public record: the transactions reported against it.
+    reports: list[dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def allowed(self) -> bool:
+        return self.decision == "allow"
+
+    @property
+    def refused(self) -> bool:
+        """True for "refuse" and for any decision that is not "allow"."""
+        return not self.allowed
+
+    @property
+    def reason_codes(self) -> list[str]:
+        return [str(r["code"]) for r in self.reasons if isinstance(r, dict) and r.get("code")]
+
+    @classmethod
+    def from_dict(cls, d: Any) -> "PreflightVerdict":
+        """Raises OverwingError when the answer has no id or no decision, so a malformed answer is never read as an allow."""
+        if not isinstance(d, dict):
+            raise _malformed("something that is not an object", d)
+        if not isinstance(d.get("id"), str) or not d["id"]:
+            raise _malformed("no verdict id", d)
+        if not isinstance(d.get("decision"), str) or not d["decision"]:
+            raise _malformed("no decision", d)
+        reasons = d.get("reasons")
+        if not isinstance(reasons, list):
+            # The public record carries only the codes.
+            codes = d.get("reason_codes")
+            reasons = [{"code": c, "detail": None} for c in codes] if isinstance(codes, list) else []
+        vfs, slot = d.get("valid_for_seconds"), d.get("slot")
+        return cls(
+            id=d["id"],
+            decision=d["decision"],
+            reasons=[r for r in reasons if isinstance(r, dict)],
+            effects=d.get("effects") if isinstance(d.get("effects"), dict) else None,
+            programs=[p for p in (d.get("programs") or []) if isinstance(p, str)] if isinstance(d.get("programs"), list) else [],
+            digest=d.get("digest"),
+            slot=slot if isinstance(slot, int) else None,
+            covered=d.get("covered") is True,
+            decided_at=d.get("decided_at"),
+            valid_for_seconds=vfs if isinstance(vfs, int) else None,
+            receipt=d.get("receipt") if isinstance(d.get("receipt"), dict) else None,
+            record_url=d.get("record_url"),
+            if_it_goes_wrong=d.get("if_it_goes_wrong"),
+            reports=[r for r in d["reports"] if isinstance(r, dict)] if isinstance(d.get("reports"), list) else [],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    """What the chain showed for a landed transaction reported against a verdict."""
+
+    check_id: str
+    #: The landed transaction's signature.
+    transaction: str
+    #: "miss" (it took more than the policy permits after an allow) or "not_a_miss".
+    outcome: str
+    why: str | None = None
+    covered: bool = False
+    payout_usd: float | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def miss(self) -> bool:
+        return self.outcome == "miss"
+
+    @classmethod
+    def from_dict(cls, d: Any) -> "PreflightReport":
+        if not isinstance(d, dict) or not isinstance(d.get("outcome"), str):
+            raise _malformed("no report outcome", d)
+        return cls(check_id=str(d.get("check_id") or ""), transaction=str(d.get("transaction") or ""), outcome=d["outcome"], why=d.get("why"), covered=d.get("covered") is True, payout_usd=d.get("payout_usd"), raw=d)
+
+
+@dataclass(frozen=True)
+class PreflightRecord:
+    """The public record: every verdict and every miss. Never the wallet, the amounts or the transaction."""
+
+    #: {"checks", "allowed", "refused", "covered_allows", "reports", "misses", "covered_misses", "paid_usd"}.
+    totals: dict[str, Any] = field(default_factory=dict)
+    misses: list[dict[str, Any]] = field(default_factory=list)
+    #: The latest verdicts, newest first, as the record publishes them (codes, digest and signature).
+    recent: list[PreflightVerdict] = field(default_factory=list)
+    #: Whether the guarantee is active, the reserve, and the limits.
+    guarantee: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def from_dict(cls, d: Any) -> "PreflightRecord":
+        if not isinstance(d, dict):
+            raise _malformed("a record that is not an object", d)
+        return cls(totals=dict(d.get("totals") or {}), misses=list(d.get("misses") or []), recent=[PreflightVerdict.from_dict(v) for v in d.get("recent") or []], guarantee=dict(d.get("guarantee") or {}), raw=d)

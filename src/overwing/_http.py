@@ -1,4 +1,4 @@
-"""One HTTP layer shared by the Overwing, Atlas and Tower clients."""
+"""One HTTP layer shared by the Overwing, Atlas, Beacon, Preflight and Tower clients."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import httpx
 from ._errors import OverwingError
 
 DEFAULT_BASE_URL = "https://overwing.ai"
-SDK_VERSION = "0.9.0"
+SDK_VERSION = "0.10.0"
 _USER_AGENT = f"overwing-python/{SDK_VERSION}"
 
 HeadersHook = Callable[[httpx.Headers], None]
@@ -45,6 +45,14 @@ def error_from(res: httpx.Response) -> OverwingError:
             body=body,
         )
     return OverwingError(str(err) if err is not None else f"HTTP {res.status_code}", res.status_code, retry_after, body=body)
+
+
+def _json(res: httpx.Response) -> Any:
+    """The body as JSON. A 2xx answer that is not JSON is an error, not a ValueError from deep inside."""
+    try:
+        return res.json()
+    except ValueError as e:
+        raise OverwingError(f"Overwing API answered HTTP {res.status_code} with a body that is not JSON", res.status_code, code="malformed_response") from e
 
 
 def _retryable(res: httpx.Response) -> bool:
@@ -108,11 +116,11 @@ class SyncHTTP(_Base):
                     attempt += 1
                     time.sleep(0.25 * attempt)
                     continue
-                raise OverwingError(f"Overwing API unreachable: {e}") from e
+                raise OverwingError(f"Overwing API unreachable: {e}", code="unreachable") from e
             if on_headers is not None:
                 on_headers(res.headers)
             if res.status_code in accept:
-                return res.json()
+                return _json(res)
             if _retryable(res) and attempt < self._max_retries:
                 attempt += 1
                 ra = res.headers.get("retry-after")
@@ -120,7 +128,7 @@ class SyncHTTP(_Base):
                 continue
             if res.is_error:
                 raise error_from(res)
-            return res.json() if res.content else None
+            return _json(res) if res.content else None
 
 
 class AsyncHTTP(_Base):
@@ -142,11 +150,11 @@ class AsyncHTTP(_Base):
                     attempt += 1
                     await asyncio.sleep(0.25 * attempt)
                     continue
-                raise OverwingError(f"Overwing API unreachable: {e}") from e
+                raise OverwingError(f"Overwing API unreachable: {e}", code="unreachable") from e
             if on_headers is not None:
                 on_headers(res.headers)
             if res.status_code in accept:
-                return res.json()
+                return _json(res)
             if _retryable(res) and attempt < self._max_retries:
                 attempt += 1
                 ra = res.headers.get("retry-after")
@@ -154,4 +162,4 @@ class AsyncHTTP(_Base):
                 continue
             if res.is_error:
                 raise error_from(res)
-            return res.json() if res.content else None
+            return _json(res) if res.content else None
