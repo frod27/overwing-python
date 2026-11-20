@@ -8,7 +8,7 @@
 </p>
 
 <p align="center"><strong>Guardrails for LLM output, in one line.</strong><br>
-OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed client. Also: <a href="#atlas-who-is-this-user-agent-no-key-needed">Atlas</a> user-agent lookups with no key, <a href="#preflight-should-the-agent-sign-this-solana-transaction">Preflight</a> checks before an agent signs a Solana transaction, and <a href="#tower-let-an-agent-operate-a-legacy-system">Tower</a> for agents operating legacy systems. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
+OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed client. Also: <a href="#atlas-who-is-this-user-agent-no-key-needed">Atlas</a> user-agent lookups with no key, and <a href="#preflight-should-the-agent-sign-this-solana-transaction">Preflight</a> checks before an agent signs a Solana transaction. Every message gets a <code>pass</code> / <code>fail</code> / <code>review</code> verdict with calibrated confidence before it reaches your user.</p>
 
 <p align="center">
   <a href="https://pypi.org/project/overwing/"><img alt="PyPI" src="https://img.shields.io/pypi/v/overwing?color=0B1220&label=overwing"></a>
@@ -20,7 +20,7 @@ OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed cli
 ---
 
 ```bash
-pip install overwing               # client, Atlas, Beacon, Preflight, Tower
+pip install overwing               # client, Atlas, Beacon, Preflight
 pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
 pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
@@ -181,41 +181,6 @@ preflight.overview()                       # policy fields, reason codes, prices
 ```
 
 One check counts as one evaluation. `AsyncPreflight` is the async twin, and `Overwing` and `AsyncOverwing` have the same calls as `preflight_check`, `preflight_verdict`, `preflight_report`, `preflight_record` and `preflight_overview`. An agent with a wallet and no account can post the same body to `preflight.x402_url()` with any x402 client for $0.01 in USDC.
-
-## Tower: let an agent operate a legacy system
-
-[Overwing Tower](https://overwing.ai/products/tower) sits between an agent and a system of record. The agent calls typed operations. Tower rules on each one: execute it, ask a person, or reject it. Every step gets a signed receipt.
-
-There are two keys. The **organization key** sets things up. Each **agent key** is scoped to the operations that agent may call.
-
-```python
-from overwing import Overwing, Tower
-
-# Once, as the organization
-ow = Overwing()                                   # OVERWING_API_KEY
-ow.tower_load_template()                          # starter workflow: email PO to order entry (mock IBM i)
-agent = ow.tower_create_agent("order-intake", ["create_order", "cancel_order"])
-agent.key                                         # ow_agent_... shown once: store it as OVERWING_AGENT_KEY
-
-# Then, as the agent
-tower = Tower()                                   # OVERWING_AGENT_KEY
-tower.capabilities()["operations"]                # what you may call, with JSON Schema inputs
-
-action = tower.submit("create_order", order, idempotency_key=email.message_id)
-
-if action.executed:
-    action.result                                 # what the system returned
-elif action.pending:
-    action = tower.wait_for_review(action.action_id)   # a person must approve; do not resubmit
-elif action.rejected:
-    action.decision.reason                        # why; do not retry unchanged
-```
-
-`submit` returns for every ruling and raises only when the request itself is wrong. Those errors are typed for agents: `e.code` (`invalid_input`, `forbidden_scope`, `quota_exceeded`, ...), `e.field`, `e.retryable`, and `e.suggested_fix`.
-
-Use a stable `idempotency_key` per business request. Repeating it returns the original outcome, with `action.replayed` set, instead of acting twice.
-
-Also on the agent client: `decide` (a ruling with no side effects), `submit(..., dry_run=True)`, `get`, `compensate` (undo an executed action), `get_receipt`, `verify_receipts` and `public_key`. On the organization client: `tower_list_agents`, `tower_revoke_agent`, and `tower_agent`, which creates an agent and returns a ready `Tower`. `AsyncTower` and `AsyncOverwing` mirror all of it.
 
 ## Client
 
