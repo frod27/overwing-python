@@ -1,0 +1,11 @@
+# The workflows pin every action to a commit. Once a week this opens one pull request that moves all
+# of the pins, and the version comments beside them, to the latest releases.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
