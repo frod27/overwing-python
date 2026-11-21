@@ -20,7 +20,7 @@ OpenAI Agents SDK guardrails, LangChain runnables and callbacks, and a typed cli
 ---
 
 ```bash
-pip install overwing               # client, Atlas, Beacon, Preflight
+pip install overwing               # client, Atlas, Beacon, Preflight, Radar
 pip install "overwing[agents]"      # OpenAI Agents SDK guardrails
 pip install "overwing[langchain]"   # LangChain guard runnable + callbacks
 ```
@@ -181,6 +181,56 @@ preflight.overview()                       # policy fields, reason codes, prices
 ```
 
 One check counts as one evaluation. `AsyncPreflight` is the async twin, and `Overwing` and `AsyncOverwing` have the same calls as `preflight_check`, `preflight_verdict`, `preflight_report`, `preflight_record` and `preflight_overview`. An agent with a wallet and no account can post the same body to `preflight.x402_url()` with any x402 client for $0.01 in USDC.
+
+## Radar: are agents acting together on your shared stores?
+
+[Overwing Radar](https://overwing.ai/radar) watches the stores agents share (a cache, a queue, a bucket, a ticket system) for agents acting together, and for one stolen login behaving like a machine. You report who touched which entry, with a hash and a size and never the contents, and Radar groups what it finds into incidents. Radar recommends what to do. It changes nothing on your systems.
+
+```python
+from overwing import Radar
+
+radar = Radar()                            # OVERWING_API_KEY; every call needs a key
+
+result = radar.send_events([               # up to 500 a call
+    {"id": "evt-000001", "surface_id": "scratch-bucket", "artifact_id": "notes/plan.md",
+     "actor_id": "agent-17", "principal_id": "team-a", "op": "read", "ts": "2026-11-20T12:00:00Z",
+     "content_hash": "sha256:9f2c0e...", "size_bytes": 812},
+])
+result.accepted, result.duplicates         # 1, 0
+
+for incident in radar.list_incidents(status="open"):
+    incident.severity                      # "low" | "medium" | "high" | "critical"
+    incident.detectors                     # ["sweep"], ["decoy_touch", "sweep"], ...
+    incident.recommended_actions           # [{"action": "revoke_identity", "surface": None, "actors": [...], "reason": "..."}]
+    radar.get_incident(incident.id).timeline   # the events the evidence names, in time order
+```
+
+An event needs `id`, `surface_id`, `artifact_id`, `actor_id`, `op` (`read`, `write`, `list` or `delete`) and `ts` (an ISO 8601 time, or milliseconds since the epoch). `principal_id`, `content_hash`, `parent_artifact_hash`, `size_bytes` and `metadata` are optional. Send `principal_id` wherever you know it: actors that share one are never a finding. A batch is taken whole or not at all, so one bad event raises `OverwingError` with `status == 400` and a message that names it. An event id sent again is counted once, so repeat a batch when no answer came back.
+
+A decoy key is a key that exists only where your real keys are kept. Nothing legitimate uses it, so the first request that carries it opens a critical incident:
+
+```python
+decoy = radar.mint_decoy("ci-secrets", kind="key", label="llm gateway")
+decoy.content      # two lines of an env file: the address and the key. Shown once and never stored
+decoy.base_url     # the address the key is tried at
+decoy.key          # "sk-gw-..."
+```
+
+Keep those lines where real keys are kept: an env file on a build machine, a CI variable, a secrets note. Nothing there needs instrumenting, and the incident names the place and the address the request came from. `radar.retire_decoy(decoy.id)` retires it. Without `kind="key"`, `mint_decoy` returns an entry to write to the surface (`kind` is `notes`, `credentials`, `export` or `config`), and `register_decoy` records an entry of your own.
+
+Radar posts `swarm.incident.opened` and `swarm.incident.updated` to your organization's webhook, signed with your webhook secret. Check the signature before you act on one:
+
+```python
+from overwing import verify_radar_webhook
+
+# raw_body is the request body exactly as it arrived, before any JSON parsing
+if not verify_radar_webhook(webhook_secret, request.headers.get("X-Overwing-Signature"), raw_body):
+    return 401     # wrong secret, changed body, more than five minutes old, or no signature
+event = json.loads(raw_body)
+event["type"], event["data"]["id"], event["data"]["recommended_actions"]
+```
+
+Also: `status()`, `list_surfaces()`, `name_surface()`, `list_decoys()`, `close_incident()`, `get_thresholds()`, `set_thresholds({"sweep": {"exemptActors": ["svc-backup"]}})` and `send_cloudtrail(log_file)` for AWS CloudTrail records. A responder of your own records what it did with `report_response(incident.id, "revoke_identity", "done", target=...)`, and `list_responses()` reads the record back. A key with scope `swarm` can send events, send CloudTrail records and report a response, and nothing else: it is the key to put in the infrastructure being watched. `AsyncRadar` is the async twin, and `Overwing` and `AsyncOverwing` have the same calls with a `radar_` prefix.
 
 ## Client
 

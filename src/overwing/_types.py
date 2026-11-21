@@ -508,3 +508,151 @@ class PreflightRecord:
         if not isinstance(d, dict):
             raise _malformed("a record that is not an object", d)
         return cls(totals=dict(d.get("totals") or {}), misses=list(d.get("misses") or []), recent=[PreflightVerdict.from_dict(v) for v in d.get("recent") or []], guarantee=dict(d.get("guarantee") or {}), raw=d)
+
+
+# ---- Overwing Radar ----
+
+RadarSeverity = Literal["low", "medium", "high", "critical"]
+
+
+@dataclass(frozen=True)
+class RadarIngest:
+    """What one batch of events came to. A batch is taken whole or not at all, so every event is in one of the two counts."""
+
+    #: Events stored by this request.
+    accepted: int
+    #: Events whose id had been sent before: counted once, so a batch can be repeated when no answer came back.
+    duplicates: int
+    #: The fire drill the events were counted against, when one was named.
+    drill_id: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RadarIngest":
+        return cls(accepted=int(d.get("accepted") or 0), duplicates=int(d.get("duplicates") or 0), drill_id=d.get("drill_id"), raw=d)
+
+
+@dataclass(frozen=True)
+class RadarDecoy:
+    """A decoy: an entry, or a key, that nothing legitimate has a reason to touch. Any touch of one opens an incident.
+
+    `content` (and, for a decoy key, `base_url` and `key`) are present only on the answer that minted it.
+    They are not stored and are not shown again.
+    """
+
+    id: str
+    #: "key" for a decoy key, "artifact" for an entry on a surface.
+    kind: str
+    surface_id: str
+    artifact_id: str
+    content_hash: str
+    label: str | None = None
+    created_at: str | None = None
+    #: Set once the decoy is retired. A retired decoy opens no incidents.
+    retired_at: str | None = None
+    #: On a mint: what to write to `artifact_id` on the surface, or, for a decoy key, the lines to keep where real keys are kept.
+    content: str | None = field(default=None, repr=False)
+    #: On a decoy key: the address it is tried at.
+    base_url: str | None = None
+    #: On a decoy key: the key itself.
+    key: str | None = field(default=None, repr=False)
+    #: On a mint: what to do with it, in a sentence or two.
+    plant: str | None = None
+    #: On a decoy key: set when the address configured for decoy keys did not answer and another was used.
+    warning: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def retired(self) -> bool:
+        return self.retired_at is not None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RadarDecoy":
+        return cls(
+            id=d["id"],
+            kind=d.get("kind", "artifact"),
+            surface_id=d.get("surface_id", ""),
+            artifact_id=d.get("artifact_id", ""),
+            content_hash=d.get("content_hash", ""),
+            label=d.get("label"),
+            created_at=d.get("created_at"),
+            retired_at=d.get("retired_at"),
+            content=d.get("content"),
+            base_url=d.get("base_url"),
+            key=d.get("key"),
+            plant=d.get("plant"),
+            warning=d.get("warning"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class RadarIncident:
+    """One incident: the findings of one operation, grouped. Radar recommends; it changes nothing on your systems."""
+
+    id: str
+    #: "open" or "closed".
+    status: str
+    severity: RadarSeverity
+    title: str = ""
+    #: Which detectors fired: "decoy_credential", "decoy_touch", "sweep", "convergence", "relay_chain", "cold_start_cluster".
+    detectors: list[str] = field(default_factory=list)
+    surfaces: list[str] = field(default_factory=list)
+    actors: list[str] = field(default_factory=list)
+    first_event_at: str | None = None
+    last_event_at: str | None = None
+    opened_at: str | None = None
+    updated_at: str | None = None
+    closed_at: str | None = None
+    closed_by: str | None = None
+    #: Set on an incident a fire drill produced.
+    drill_id: str | None = None
+    #: What to do: each {"action", "surface", "actors"?, "reason"}. Recommendations only.
+    recommended_actions: list[dict[str, Any]] = field(default_factory=list)
+    #: Always False: Overwing acts on nobody's systems.
+    enforced: bool = False
+    #: What your own responder reported doing: each {"action", "target", "status", "detail", "by", "at"}.
+    responses: list[dict[str, Any]] = field(default_factory=list)
+    #: Seconds from the incident opening to the first action carried out. None while nothing has been.
+    contained_in_seconds: int | None = None
+    #: The incident in the dashboard.
+    url: str | None = None
+    #: From `get_incident`: each {"detector", "score", "summary", "surfaces", "actors", "artifacts", "event_ids", "from", "to"}.
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    #: In a list, and on a close: how many pieces of evidence the incident holds.
+    evidence_count: int | None = None
+    #: From `get_incident`: the events the evidence names, in time order.
+    timeline: list[dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def open(self) -> bool:
+        return self.status == "open"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RadarIncident":
+        return cls(
+            id=d["id"],
+            status=d["status"],
+            severity=d["severity"],
+            title=d.get("title", ""),
+            detectors=list(d.get("detectors") or []),
+            surfaces=list(d.get("surfaces") or []),
+            actors=list(d.get("actors") or []),
+            first_event_at=d.get("first_event_at"),
+            last_event_at=d.get("last_event_at"),
+            opened_at=d.get("opened_at"),
+            updated_at=d.get("updated_at"),
+            closed_at=d.get("closed_at"),
+            closed_by=d.get("closed_by"),
+            drill_id=d.get("drill_id"),
+            recommended_actions=list(d.get("recommended_actions") or []),
+            enforced=d.get("enforced") is True,
+            responses=list(d.get("responses") or []),
+            contained_in_seconds=d.get("contained_in_seconds"),
+            url=d.get("url"),
+            evidence=list(d.get("evidence") or []),
+            evidence_count=d.get("evidence_count"),
+            timeline=list(d.get("timeline") or []),
+            raw=d,
+        )

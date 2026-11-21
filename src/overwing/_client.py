@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import httpx
 
 from ._errors import OverwingError
 from ._http import DEFAULT_BASE_URL, AsyncHTTP, SyncHTTP, compact as _compact, query, segment
 from . import _preflight as _pf
+from . import _radar as _rd
 from ._tower import AsyncTower, Tower
-from ._types import Account, AtlasLookup, BatchResult, DomainProof, Evaluation, PreflightRecord, PreflightReport, PreflightVerdict, TowerAgent
+from ._types import Account, AtlasLookup, BatchResult, DomainProof, Evaluation, PreflightRecord, PreflightReport, PreflightVerdict, RadarDecoy, RadarIncident, RadarIngest, TowerAgent
 
 __all__ = ["DEFAULT_BASE_URL", "AsyncOverwing", "Overwing"]
 
@@ -168,6 +169,72 @@ class Overwing(SyncHTTP):
         """The policy fields, the reason codes, the prices and the endpoints."""
         return self._request("GET", _pf._OVERVIEW)
 
+    # ---- Overwing Radar (agents acting together on a shared store; Radar recommends and changes nothing; see Radar) ----
+
+    def radar_status(self) -> dict[str, Any]:
+        """Events sent this month, the allowance, monitoring, and the limits of one request."""
+        return self._request("GET", _rd._STATUS)
+
+    def radar_send_events(self, events: Sequence[Mapping[str, Any]], drill_id: str | None = None) -> RadarIngest:
+        """Report up to 500 events from shared surfaces: hashes and sizes, never contents. See `Radar.send_events`."""
+        return RadarIngest.from_dict(self._request("POST", _rd._EVENTS, json=_rd.events_body(events, drill_id)))
+
+    def radar_list_surfaces(self) -> list[dict[str, Any]]:
+        """The surfaces with events, and what each saw in the last day."""
+        return self._request("GET", _rd._SURFACES)["surfaces"]
+
+    def radar_name_surface(self, surface_id: str, kind: str | None = None, label: str | None = None) -> dict[str, Any]:
+        """Name a surface, or change its kind and label. See `Radar.name_surface`."""
+        return self._request("POST", _rd._SURFACES, json=_rd.surface_body(surface_id, kind, label))
+
+    def radar_list_decoys(self) -> list[RadarDecoy]:
+        """The decoys planted and retired."""
+        return [RadarDecoy.from_dict(d) for d in self._request("GET", _rd._DECOYS)["decoys"]]
+
+    def radar_mint_decoy(self, surface_id: str, kind: str | None = None, label: str | None = None) -> RadarDecoy:
+        """Mint a decoy, or with `kind="key"` a decoy key. Its content is in the answer once. See `Radar.mint_decoy`."""
+        return RadarDecoy.from_dict(self._request("POST", _rd._DECOYS, json=_rd.mint_body(surface_id, kind, label)))
+
+    def radar_register_decoy(self, surface_id: str, artifact_id: str, content_hash: str, label: str | None = None) -> RadarDecoy:
+        """Register an entry of your own as a decoy."""
+        return RadarDecoy.from_dict(self._request("POST", _rd._DECOYS, json=_rd.register_body(surface_id, artifact_id, content_hash, label)))
+
+    def radar_retire_decoy(self, decoy_id: str) -> dict[str, Any]:
+        """Retire a decoy. It stops opening incidents."""
+        return self._request("DELETE", _rd.decoy_path(decoy_id))
+
+    def radar_list_incidents(self, status: str | None = None, limit: int | None = None) -> list[RadarIncident]:
+        """Incidents, the most recently active first. `status` is "open" or "closed"."""
+        return [RadarIncident.from_dict(i) for i in self._request("GET", _rd.incidents_path(status, limit))["incidents"]]
+
+    def radar_get_incident(self, incident_id: str) -> RadarIncident:
+        """One incident, with its evidence and a timeline."""
+        return RadarIncident.from_dict(self._request("GET", _rd.incident_path(incident_id)))
+
+    def radar_close_incident(self, incident_id: str) -> RadarIncident:
+        """Close an incident that has been dealt with."""
+        return RadarIncident.from_dict(self._request("POST", _rd.close_path(incident_id)))
+
+    def radar_list_responses(self, incident_id: str) -> dict[str, Any]:
+        """What your own responder reported doing about an incident."""
+        return self._request("GET", _rd.responses_path(incident_id))
+
+    def radar_report_response(self, incident_id: str, action: str, status: str, target: str | None = None, detail: str | None = None, by: str | None = None) -> dict[str, Any]:
+        """Record one thing a responder did about an incident. See `Radar.report_response`."""
+        return self._request("POST", _rd.responses_path(incident_id), json=_rd.response_body(action, status, target, detail, by))
+
+    def radar_get_thresholds(self) -> dict[str, Any]:
+        """The detector thresholds in force, what this account changed, and the defaults."""
+        return self._request("GET", _rd._CONFIG)
+
+    def radar_set_thresholds(self, changes: Mapping[str, Any]) -> dict[str, Any]:
+        """Replace what this account has changed; {} restores every default."""
+        return self._request("PUT", _rd._CONFIG, json=_rd.thresholds_body(changes))
+
+    def radar_send_cloudtrail(self, body: _rd.CloudTrailBody) -> dict[str, Any]:
+        """Send what AWS CloudTrail saw, as parsed JSON. See `Radar.send_cloudtrail`."""
+        return self._request("POST", _rd._AWS, json=_rd.cloudtrail_body(body))
+
     # ---- Overwing Tower setup (agents operate through Tower(agent_key)) ----
 
     def tower_load_template(self) -> dict[str, Any]:
@@ -296,6 +363,56 @@ class AsyncOverwing(AsyncHTTP):
 
     async def preflight_overview(self) -> dict[str, Any]:
         return await self._request("GET", _pf._OVERVIEW)
+
+    # ---- Overwing Radar ----
+
+    async def radar_status(self) -> dict[str, Any]:
+        return await self._request("GET", _rd._STATUS)
+
+    async def radar_send_events(self, events: Sequence[Mapping[str, Any]], drill_id: str | None = None) -> RadarIngest:
+        return RadarIngest.from_dict(await self._request("POST", _rd._EVENTS, json=_rd.events_body(events, drill_id)))
+
+    async def radar_list_surfaces(self) -> list[dict[str, Any]]:
+        return (await self._request("GET", _rd._SURFACES))["surfaces"]
+
+    async def radar_name_surface(self, surface_id: str, kind: str | None = None, label: str | None = None) -> dict[str, Any]:
+        return await self._request("POST", _rd._SURFACES, json=_rd.surface_body(surface_id, kind, label))
+
+    async def radar_list_decoys(self) -> list[RadarDecoy]:
+        return [RadarDecoy.from_dict(d) for d in (await self._request("GET", _rd._DECOYS))["decoys"]]
+
+    async def radar_mint_decoy(self, surface_id: str, kind: str | None = None, label: str | None = None) -> RadarDecoy:
+        return RadarDecoy.from_dict(await self._request("POST", _rd._DECOYS, json=_rd.mint_body(surface_id, kind, label)))
+
+    async def radar_register_decoy(self, surface_id: str, artifact_id: str, content_hash: str, label: str | None = None) -> RadarDecoy:
+        return RadarDecoy.from_dict(await self._request("POST", _rd._DECOYS, json=_rd.register_body(surface_id, artifact_id, content_hash, label)))
+
+    async def radar_retire_decoy(self, decoy_id: str) -> dict[str, Any]:
+        return await self._request("DELETE", _rd.decoy_path(decoy_id))
+
+    async def radar_list_incidents(self, status: str | None = None, limit: int | None = None) -> list[RadarIncident]:
+        return [RadarIncident.from_dict(i) for i in (await self._request("GET", _rd.incidents_path(status, limit)))["incidents"]]
+
+    async def radar_get_incident(self, incident_id: str) -> RadarIncident:
+        return RadarIncident.from_dict(await self._request("GET", _rd.incident_path(incident_id)))
+
+    async def radar_close_incident(self, incident_id: str) -> RadarIncident:
+        return RadarIncident.from_dict(await self._request("POST", _rd.close_path(incident_id)))
+
+    async def radar_list_responses(self, incident_id: str) -> dict[str, Any]:
+        return await self._request("GET", _rd.responses_path(incident_id))
+
+    async def radar_report_response(self, incident_id: str, action: str, status: str, target: str | None = None, detail: str | None = None, by: str | None = None) -> dict[str, Any]:
+        return await self._request("POST", _rd.responses_path(incident_id), json=_rd.response_body(action, status, target, detail, by))
+
+    async def radar_get_thresholds(self) -> dict[str, Any]:
+        return await self._request("GET", _rd._CONFIG)
+
+    async def radar_set_thresholds(self, changes: Mapping[str, Any]) -> dict[str, Any]:
+        return await self._request("PUT", _rd._CONFIG, json=_rd.thresholds_body(changes))
+
+    async def radar_send_cloudtrail(self, body: _rd.CloudTrailBody) -> dict[str, Any]:
+        return await self._request("POST", _rd._AWS, json=_rd.cloudtrail_body(body))
 
     async def tower_load_template(self) -> dict[str, Any]:
         return await self._request("POST", "/api/v1/tower/template", json={})

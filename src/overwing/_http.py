@@ -1,4 +1,4 @@
-"""One HTTP layer shared by the Overwing, Atlas, Beacon, Preflight and Tower clients."""
+"""One HTTP layer shared by the Overwing, Atlas, Beacon, Preflight, Radar and Tower clients."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import httpx
 from ._errors import OverwingError
 
 DEFAULT_BASE_URL = "https://overwing.ai"
-SDK_VERSION = "0.10.1"
+SDK_VERSION = "0.11.0"
 _USER_AGENT = f"overwing-python/{SDK_VERSION}"
 
 HeadersHook = Callable[[httpx.Headers], None]
